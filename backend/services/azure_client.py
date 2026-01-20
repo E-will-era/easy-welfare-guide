@@ -27,5 +27,12 @@ class AzureOpenAIClient:
 
     # [3단계 로직] 위에서 만든 _get_prompt를 활용
     async def get_summary(self, content: str):
-        instruction = await self._get_prompt("summarize_ai.txt")
-        # ... 이후 AI 호출 로직
+        prompt_instruction = await get_prompt("summarize_ai.txt")
+        response = await self.client.chat.completions.create(
+        model="gpt-35-turbo", # 팀의 모델명으로 수정
+        messages=[
+            {"role": "system", "content": prompt_instruction},
+            {"role": "user", "content": content}
+        ]
+    )
+        return response.choices[0].message.content
