@@ -16,28 +16,29 @@ class AzureOpenAIClient:
 
     # [2단계 로직] 클래스 내부에 배치
     async def _get_prompt(self, filename: str):
-        # 현재 위치가 backend/services/ 이므로 
-        # prompts 폴더는 상위로 두 번 올라가야 할 수도 있습니다 (구조에 따라 확인 필요)
-        # 안전한 경로 설정을 위해 os.path를 권장합니다.
-        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        prompt_path = os.path.join(base_path, "prompts", filename)
+        # 1. 절대 경로 직접 지정 (가장 확실한 방법)
+        # 띄어쓰기 오타가 발생하지 않도록 filename을 그대로 조인합니다.
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        prompt_path = os.path.join(backend_dir, "prompts", filename.strip())
         
+        # [검증] 터미널에 찍히는 이 경로를 복사해서 확인해 보세요.
+        print(f"--- [DEBUG] Target Path: {prompt_path} ---")
+        
+        if not os.path.exists(prompt_path):
+            raise FileNotFoundError(f"프롬프트 파일을 찾을 수 없습니다: {prompt_path}")
+
         async with aiofiles.open(prompt_path, mode='r', encoding='utf-8') as f:
             return await f.read()
 
-    # [3단계 로직] 위에서 만든 _get_prompt를 활용하여 실제 요약 수행
     async def get_summary(self, content: str):
-        # 1. 파일 시스템에서 프롬프트 지침 읽기
+        # 여기서 파일명에 공백이 들어가지 않도록 주의하세요!
         prompt_instruction = await self._get_prompt("summarize_ai.txt")
         
-        # 2. Azure OpenAI 비동기 호출
         response = await self.client.chat.completions.create(
-            model="gpt-35-turbo", # 팀에서 설정한 Azure 배포 모델명으로 수정
+            model="gpt-35-turbo",
             messages=[
                 {"role": "system", "content": prompt_instruction},
                 {"role": "user", "content": content}
             ]
         )
-        
-        # 3. 결과 텍스트만 추출하여 반환
         return response.choices[0].message.content
