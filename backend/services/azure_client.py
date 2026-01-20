@@ -25,14 +25,19 @@ class AzureOpenAIClient:
         async with aiofiles.open(prompt_path, mode='r', encoding='utf-8') as f:
             return await f.read()
 
-    # [3단계 로직] 위에서 만든 _get_prompt를 활용
+    # [3단계 로직] 위에서 만든 _get_prompt를 활용하여 실제 요약 수행
     async def get_summary(self, content: str):
-        prompt_instruction = await get_prompt("summarize_ai.txt")
+        # 1. 파일 시스템에서 프롬프트 지침 읽기
+        prompt_instruction = await self._get_prompt("summarize_ai.txt")
+        
+        # 2. Azure OpenAI 비동기 호출
         response = await self.client.chat.completions.create(
-        model="gpt-35-turbo", # 팀의 모델명으로 수정
-        messages=[
-            {"role": "system", "content": prompt_instruction},
-            {"role": "user", "content": content}
-        ]
-    )
+            model="gpt-35-turbo", # 팀에서 설정한 Azure 배포 모델명으로 수정
+            messages=[
+                {"role": "system", "content": prompt_instruction},
+                {"role": "user", "content": content}
+            ]
+        )
+        
+        # 3. 결과 텍스트만 추출하여 반환
         return response.choices[0].message.content
