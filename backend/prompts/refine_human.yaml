@@ -20,7 +20,7 @@ rules_by_level:
     example: "중위소득 -> 엄마 아빠가 받는 용돈, 건강보험료 -> 아플 때를 위해 모아두는 저금통"
 
 constraints:
-  - "1차로 LLM을 통해 의미를 파악하고, 2차로 제공된 '순화어 사전'을 최우선 적용하여 문장을 재구성합니다."
+  - "1차로 LLM을 통해 의미를 파악하고 쉽게 문장을 재구성합니다."
   - "의미가 왜곡되어서는 안 됩니다."
   - "희망적인 추측('당첨될 거예요')을 배제하고 사실 기반의 가능성('할 수도 있어요')으로 표현하십시오."
   - "친절한 어조를 유지하되, 핵심 정보(무엇을 해야 하는지)는 명확히 유지합니다."
@@ -28,5 +28,11 @@ constraints:
 output_format:
   json_structure:
     level: "number"
-    simplified_text: "string (순화된 텍스트 내용)"
-    metaphors_used: "object {원문용어: 비유용어}"
+    simplified_text: "string"
+    metaphors_used: "object"
+  example:
+    level: 13
+    simplified_text: "우리 동네 평균 수입의 50% 이하인 가정"
+    metaphors_used:
+      중위소득: "우리 동네 평균 수입"
+      가구원: "같이 사는 가족"
