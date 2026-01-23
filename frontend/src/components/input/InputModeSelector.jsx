@@ -2,6 +2,7 @@ import React from 'react';
 import TextSnippetIcon from '@mui/icons-material/TextSnippet';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+
 export default function InputModeSelector({ currentMode, onModeChange }) {
     return (
         <div className="flex gap-3 mb-6">
@@ -14,16 +15,6 @@ export default function InputModeSelector({ currentMode, onModeChange }) {
             >
                 <TextSnippetIcon size={20} />
                 텍스트
-            </button>
-            <button
-                onClick={() => onModeChange('pdf')}
-                className={`mode-button ${currentMode === 'pdf'
-                    ? 'mode-button-active'
-                    : 'mode-button-inactive'
-                    }`}
-            >
-                <PictureAsPdfIcon size={20} />
-                PDF
             </button>
             <button
                 onClick={() => onModeChange('image')}

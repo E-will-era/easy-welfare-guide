@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
+import { set, get, del } from 'idb-keyval';
 import PageHeader from '../components/default/PageHeader';
 import GuideSection from '../components/input/GuideSection';
 import ResultDisplay from '../components/result/ResultDisplay';
 import InputModeSelector from '../components/input/InputModeSelector';
 import TextInput from '../components/input/TextInput';
-import PdfUploader from '../components/input/PdfUploader';
 import ImageUploader from '../components/input/ImageUploader';
 import UserQuerySummary from '../components/result/UserQuerySummary';
 import LoadingSpinner from '../components/result/LoadingSpinner';
@@ -15,6 +15,59 @@ export default function MainPage() {
     const [textInput, setTextInput] = useState('');
     const [file, setFile] = useState(null);
     const [output, setOutput] = useState('');
+
+    // Load state from sessionStorage on mount
+    // Load state from sessionStorage and IndexedDB on mount
+    React.useEffect(() => {
+        const savedState = sessionStorage.getItem('appState');
+        if (savedState) {
+            try {
+                const parsedState = JSON.parse(savedState);
+                if (parsedState.viewState) setViewState(parsedState.viewState);
+                if (parsedState.inputType) setInputType(parsedState.inputType);
+                if (parsedState.textInput) setTextInput(parsedState.textInput);
+                if (parsedState.output) setOutput(parsedState.output);
+            } catch (e) {
+                console.error("Failed to load state:", e);
+                sessionStorage.removeItem('appState');
+            }
+        }
+
+        // Load file from IndexedDB
+        get('uploadedFile').then((val) => {
+            if (val) setFile(val);
+        });
+    }, []);
+
+    // Save state to sessionStorage and IndexedDB on change
+    React.useEffect(() => {
+        const _saveState = async () => {
+            const stateToSave = {
+                viewState,
+                inputType,
+                textInput,
+                output,
+            };
+
+            // Save metadata to sessionStorage
+            try {
+                sessionStorage.setItem('appState', JSON.stringify(stateToSave));
+            } catch (e) {
+                console.error("Failed to save session state:", e);
+            }
+
+            // Save file to IndexedDB
+            if (file) {
+                set('uploadedFile', file).catch(err => console.error("Failed to save file to IDB", err));
+            } else {
+                del('uploadedFile');
+            }
+        };
+
+        const timeoutId = setTimeout(_saveState, 500); // Debounce saves
+        return () => clearTimeout(timeoutId);
+
+    }, [viewState, inputType, textInput, file, output]);
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0];
@@ -27,6 +80,7 @@ export default function MainPage() {
         setInputType(mode);
         setTextInput('');
         setFile(null);
+        // We can optionally clear storage here, but the useEffect will update it soon anyway with nulls
     };
 
     const handleSubmit = () => {
@@ -52,6 +106,8 @@ export default function MainPage() {
         setOutput('');
         setTextInput('');
         setFile(null);
+        sessionStorage.removeItem('appState'); // Clear stored state on retry
+        del('uploadedFile'); // Clear file from IDB
     };
 
     return (
@@ -65,17 +121,15 @@ export default function MainPage() {
                     {viewState === 'input' && (
                         <>
                             <GuideSection />
-                            <h2 className="text-xl font-semibold text-gray-800 mb-4 px-1">
-                                입력
-                            </h2>
                             <InputModeSelector currentMode={inputType} onModeChange={handleModeChange} />
                             <div className="input-area-fixed mb-4">
                                 {inputType === 'text' && (
                                     <TextInput value={textInput} onChange={setTextInput} />
                                 )}
-                                {inputType === 'pdf' && (
+                                {/*pdf 파일 사용 시 주석 해제
+                                    {inputType === 'pdf' && (
                                     <PdfUploader file={file} onFileChange={handleFileChange} />
-                                )}
+                                )}*/}
                                 {inputType === 'image' && (
                                     <ImageUploader file={file} onFileChange={handleFileChange} />
                                 )}
