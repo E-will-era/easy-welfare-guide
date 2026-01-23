@@ -1,6 +1,7 @@
 import React from 'react';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 
+/*pdf 업로드 시 사용.*/
 export default function PdfUploader({ file, onFileChange }) {
     return (
         <div className="mb-6">
