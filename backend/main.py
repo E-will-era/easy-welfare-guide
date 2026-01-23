@@ -1,16 +1,21 @@
 import sys
 import os
+from dotenv import load_dotenv
 from fastapi import FastAPI
-from api.v1.endpoints import azure_api  # 경로 최적화
+from backend.api.v1.endpoints import azure_api  # 경로 최적화
+from fastapi.middleware.cors import CORSMiddleware
+
+load_dotenv()
 
 # 에이전트 모듈 로드를 위한 시스템 경로 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-from app.summarizer.ai import SummarizeAgent
-from app.refiner.ai import RefineAgent
-from app.validater.ai import ValidateAgent
+from backend.app.summarizer.ai import SummarizeAgent
+from backend.app.refiner.ai import RefineAgent
+from backend.app.validater.ai import ValidateAgent
 
 # --- [비즈니스 로직 에이전트 클래스] ---
 class EasyWelfareApp:
@@ -45,6 +50,16 @@ class EasyWelfareApp:
 
 # --- [FastAPI 서버 설정] ---
 api_app = FastAPI()
+app = api_app 
+
+# CORS 설정 추가 (라우터 등록 전에!)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 개발 환경용 (모든 도메인 허용)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 라우터 연결
 api_app.include_router(azure_api.router, prefix="/api/v1/azure", tags=["Azure"])
