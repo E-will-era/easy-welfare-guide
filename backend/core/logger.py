@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from typing import Optional
-from backend.core.config import settings
+from core.config import settings
 
 def setup_logger(name: str = "easy-welfare-guide") -> logging.Logger:
     """

@@ -1,8 +1,8 @@
 import os
 import aiofiles
 from openai import AsyncAzureOpenAI
-from backend.core.config import settings
-from backend.agents.human import PromptLoader
+from core.config import settings
+from agents.human import PromptLoader
 
 class LLMHandler:
     """
