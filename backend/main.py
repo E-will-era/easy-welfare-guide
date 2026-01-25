@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.logger import logger
 from api.v1.endpoints.welfare_api import router as welfare_router
+from api.v1.endpoints.image_api import router as image_router
 
 # FastAPI 앱 초기화
 app = FastAPI(
@@ -25,6 +26,12 @@ app.include_router(
     welfare_router,  
     prefix="/api/v1",
     tags=["Welfare"]
+)
+
+app.include_router(
+    image_router,
+    prefix="/api/v1/image",
+    tags=["Image Generation"]
 )
 
 @app.get("/")
