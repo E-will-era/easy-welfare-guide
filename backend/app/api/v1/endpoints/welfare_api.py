@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from schemas.summary import SummaryRequest, SummaryResponse
-from logic.orchestrator import WelfareOrchestrator
+from app.schemas.summary import SummaryRequest, SummaryResponse
+from app.logic.orchestrator import WelfareOrchestrator
 
 router = APIRouter()
 

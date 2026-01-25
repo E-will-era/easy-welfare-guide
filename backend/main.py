@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from core.config import settings
-from core.logger import logger
-from api.v1.endpoints.welfare_api import router as welfare_router
+from app.core.config import settings
+from app.core.logger import logger
+from app.api.v1.endpoints.welfare_api import router as welfare_router
 
 # FastAPI 앱 초기화
 app = FastAPI(

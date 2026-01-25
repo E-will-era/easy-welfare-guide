@@ -1,5 +1,5 @@
-from agents.llm_handler import LLMHandler, get_llm_handler
-from core.logger import logger
+from app.agents.llm_handler import LLMHandler, get_llm_handler
+from app.core.logger import logger
 from typing import Optional
 
 class WelfareOrchestrator:
