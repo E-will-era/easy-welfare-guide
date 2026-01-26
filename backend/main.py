@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from core.config import settings
-from core.logger import logger
-from api.v1.endpoints.welfare_api import router as welfare_router
+from app.core.config import settings
+from app.core.logger import logger
+from app.api.v1.endpoints.welfare_api import router as welfare_router
+from app.api.v1.endpoints.test_api import router as test_router
 
 # FastAPI 앱 초기화
 app = FastAPI(
@@ -25,6 +26,11 @@ app.include_router(
     welfare_router,  
     prefix="/api/v1",
     tags=["Welfare"]
+)
+app.include_router(
+    test_router,
+    prefix="/api/v1",
+    tags=["Test"]
 )
 
 @app.get("/")

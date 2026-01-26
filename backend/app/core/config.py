@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     LOG_FILE: Optional[str] = None  # 로그 파일 경로 (None이면 콘솔만)
     
+    # 테스트용 더미 데이터 경로
+    DUMMY_DATA_PATH: Path = Path(__file__).resolve().parents[2] / 'test_dummy_data.json'
+
     # 프롬프트 설정
     PROMPTS_DIR: Path = Path(__file__).parent.parent / "agents" / "prompts"
     

@@ -4,15 +4,15 @@ AZURE_OPENAI_API_KEY=your_api_key_here
 AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
 AZURE_OPENAI_API_VERSION=2024-12-01-preview
 AZURE_OPENAI_MODEL=gpt-4.1-2
-
+ 
 # 애플리케이션 설정
 ENVIRONMENT=development
 DEBUG=True
-
+ 
 # 로깅
 LOG_LEVEL=INFO
 LOG_FILE=logs/easy-welfare-guide.log
-
+ 
 # 서버
 HOST=0.0.0.0
 PORT=8000

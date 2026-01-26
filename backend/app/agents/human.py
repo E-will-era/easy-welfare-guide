@@ -3,7 +3,7 @@ import yaml
 import aiofiles
 from pathlib import Path
 from typing import Dict, Optional
-from core.logger import logger
+from app.core.logger import logger
 
 class PromptLoader:
     """
