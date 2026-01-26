@@ -27,7 +27,7 @@ pip install -r requirements.txt
 
 #### 4. 환경 변수 설정
 ```bash
-cp env_template .env
+cp backend/env_template .env
 ```
 
 #### 5. 웹 서버 실행
