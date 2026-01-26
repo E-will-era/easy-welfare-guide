@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
 
-router = APIRouter(prefix='/test', tags=['test'])
+router = APIRouter(prefix='/test')
 
 @router.get('/analyze', status_code=200)
 async def get_test_dummy_data():
