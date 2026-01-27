@@ -1,36 +1,30 @@
 import React from 'react';
-import Box from '@mui/material/Box';
-import footerImage from '../../assets/images/footer_design.png';
 
-export default function Footer() {
-    return (
-        <Box
-            sx={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                width: '100%',
-                height: 'auto', // Adjust height based on image aspect ratio or fix it
-                maxHeight: '100px', // Keep it reasonable
-                overflow: 'visible', // Allow image to potentially stick out or be exact
-                backgroundColor: '#39709C', // User requested color
-                display: 'flex',
-                alignItems: 'end', // Align bottom
-                justifyContent: 'center',
-                zIndex: 0,
-                pointerEvents: 'none' // Ensure it doesn't block clicks if transparent parts exist
-            }}
-        >
-            <img
-                src={footerImage}
-                alt="Footer"
-                style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    maxHeight: '100px'
-                }}
-            />
-        </Box>
-    );
-}
+const Footer = () => {
+  return (
+    <footer
+      style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        width: '100%',
+        height: 'auto',
+        maxHeight: '100px',
+        overflow: 'visible',
+        backgroundColor: '#1C8BE7',
+        display: 'flex',
+        alignItems: 'end',
+        justifyContent: 'center',
+        zIndex: 0,
+        pointerEvents: 'none'
+      }}
+    >
+      {/* Footer content goes here */}
+      <div style={{ padding: '10px 20px', color: 'white', textAlign: 'center' }}>
+        © 2026 Easy Welfare Guide. All rights reserved.
+      </div>
+    </footer>
+  );
+};
+
+export default Footer;

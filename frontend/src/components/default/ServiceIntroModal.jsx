@@ -59,7 +59,7 @@ export default function ServiceIntroModal({ isOpen, onClose }) {
                     {activeTab === 'intro' && (
                         <div className="space-y-6">
                             <div className="text-center mb-8">
-                                <img src={characterImage} alt="Character" className="w-32 mx-auto mb-4 drop-shadow-md" />
+                                <img src={characterImage} alt="Character" className="w-48 mx-auto mb-4 drop-shadow-md" />
                                 <h2 className="text-2xl font-bold text-gray-800 mb-3 leading-tight">
                                     "복잡한 공공문서를 가볍게,<br />설명은 쉽고 가깝게"
                                 </h2>
@@ -99,15 +99,19 @@ export default function ServiceIntroModal({ isOpen, onClose }) {
                                 </p>
                             </div>
 
-                            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-                                <img src={teamImage} alt="Team" className="w-full max-w-sm mx-auto mb-6 rounded-lg drop-shadow-sm" />
-                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">TEAM MEMBERS</h3>
-                                <div className="flex flex-wrap justify-center gap-3">
-                                    <MemberBadge name="김문정" />
-                                    <MemberBadge name="김은선" />
-                                    <MemberBadge name="김현식" />
-                                    <MemberBadge name="박나은" />
-                                    <MemberBadge name="윤여은" />
+                            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100 mb-10">
+                                <h3 className="text-2xl font-bold text-gray-400 uppercase tracking-widest mb-6">TEAM MEMBERS</h3>
+                                <img src={teamImage} alt="Team" className="w-full max-w-2xl mx-auto mb-6 rounded-lg drop-shadow-sm" />
+                                <div className="flex flex-col gap-3 justify-center items-center">
+                                    <div className="flex justify-center gap-3">
+                                        <MemberBadge name="박나은" />
+                                        <MemberBadge name="김현식" />
+                                        <MemberBadge name="김은선" />
+                                    </div>
+                                    <div className="flex justify-center gap-3">
+                                        <MemberBadge name="윤여은" />
+                                        <MemberBadge name="김문정" />
+                                    </div>
                                 </div>
                             </div>
                         </div>
