@@ -18,13 +18,12 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Starting Backend..."
-uvicorn backend.app.main:app --reload --port 8000 &
+uvicorn bakend.app.main:app --reload --port 8000 &
 BACKEND_PID=$!
 
 echo "Starting Frontend..."
 cd frontend
-npm install
-npm run start &
+npm start &
 FRONTEND_PID=$!
 
 # Wait for both processes
