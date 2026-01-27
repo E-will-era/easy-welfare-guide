@@ -1,7 +1,6 @@
 import React from 'react';
 import TextSnippetIcon from '@mui/icons-material/TextSnippet';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 
 export default function InputModeSelector({ currentMode, onModeChange }) {
     return (
