@@ -58,27 +58,6 @@ export default function UserQuerySummary({ type, text, file }) {
                             </div>
                         )}
 
-                        {/* PDF 타입: 클릭 시 다운로드 */}
-                        {type === 'pdf' && file && (
-                            <a
-                                href={objectUrl}
-                                download={file.name}
-                                className="group block cursor-pointer hover:bg-gray-100 p-1 rounded transition-colors"
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-gray-800 font-medium truncate max-w-[200px] sm:max-w-xs">
-                                            {file.name}
-                                        </p>
-                                        <p className="text-xs text-gray-500 mt-1">
-                                            {(file.size / 1024).toFixed(2)} KB
-                                        </p>
-                                    </div>
-                                    <DownloadIcon className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" size={20} />
-                                </div>
-                            </a>
-                        )}
-
                         {/* 이미지 타입: 클릭 시 모달 확대 */}
                         {type === 'image' && file && objectUrl && (
                             <div
