@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.core.logger import logger
 from app.api.v1.endpoints.welfare_api import router as welfare_router
 from app.api.v1.endpoints.test_api import router as test_router
-from app.api.v1.endpoints.image_api_enhanced import router as image_router
+from app.api.v1.endpoints.image_api import router as image_router
 
 # FastAPI 앱 초기화
 app = FastAPI(
