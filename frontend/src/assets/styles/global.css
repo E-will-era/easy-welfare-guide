@@ -77,3 +77,103 @@
 .info-box {
     @apply bg-gray-50 rounded-lg p-4 border border-gray-200;
 }
+
+/*============ Footer ============*/
+.footer-fixed {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: 130px;
+    overflow: visible;
+    background-color: #1C8BE7;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 40;
+    pointer-events: none;
+}
+
+.footer-content {
+    padding: 10px 20px;
+    color: white;
+    text-align: center;
+}
+
+.footer-character {
+    height: 40px;
+    width: auto;
+    object-fit: contain;
+    margin-right: -15px;
+    position: absolute;
+    right: 0;
+    z-index: 10;
+}
+
+/*============ Ghost Button ============*/
+/* 기본 스타일 (데스크탑) */
+.ghost-button {
+    @apply flex items-center justify-center gap-2 py-2 px-4 text-xs font-bold transition-all duration-300 border-2 rounded-lg;
+}
+
+.ghost-button-light {
+    @apply bg-transparent text-gray-500 border-gray-300 hover:bg-gray-50 hover:text-gray-900 hover:border-gray-400;
+}
+
+.ghost-button-light-active {
+    @apply bg-gray-100 text-gray-800 border-gray-400 shadow-sm;
+}
+
+.ghost-button-dark {
+    @apply bg-transparent text-white/40 border-transparent hover:border-white/20 hover:text-white/80;
+}
+
+.ghost-button-dark-active {
+    @apply bg-white/20 text-white border-white shadow-[0_0_15px_rgba(255,255,255,0.4)];
+}
+
+/* 모바일 FAB 스타일 */
+.ghost-button-fab {
+    @apply flex items-center justify-center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background-color: #1C8BE7;
+    color: white;
+    border: none;
+    box-shadow: 0 4px 12px rgba(28, 139, 231, 0.4);
+    transition: all 0.3s ease;
+}
+
+.ghost-button-fab:hover {
+    background-color: #1a7dd4;
+    box-shadow: 0 6px 16px rgba(28, 139, 231, 0.5);
+    transform: scale(1.05);
+}
+
+.ghost-button-fab:active {
+    transform: scale(0.95);
+}
+
+/* 서비스 소개 버튼 위치 */
+.service-intro-btn-container {
+    position: fixed;
+    z-index: 50;
+}
+
+/* 모바일: footer 바로 위 */
+@media (max-width: 639px) {
+    .service-intro-btn-container {
+        bottom: 80px;
+        right: 12px;
+    }
+}
+
+/* 데스크탑: 상단 우측 */
+@media (min-width: 640px) {
+    .service-intro-btn-container {
+        top: 24px;
+        right: 24px;
+    }
+}

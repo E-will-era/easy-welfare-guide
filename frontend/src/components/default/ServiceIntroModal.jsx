@@ -4,7 +4,6 @@ import teamImage from '../../assets/images/team_members.png';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import GroupsIcon from '@mui/icons-material/Groups';
-import VerifiedIcon from '@mui/icons-material/Verified';
 
 export default function ServiceIntroModal({ isOpen, onClose }) {
     const [activeTab, setActiveTab] = useState('intro');

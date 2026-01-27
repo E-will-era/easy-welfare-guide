@@ -10,18 +10,30 @@ import UserQuerySummary from '../components/result/UserQuerySummary';
 import ServiceIntroModal from '../components/default/ServiceIntroModal';
 import GhostButton from '../components/ui/GhostButton';
 import LoadingSpinner from '../components/result/LoadingSpinner';
+import ServiceReference from '../components/result/ServiceReference';
+import FeedbackLoopSelector from '../components/result/FeedbackLoopSelector';
+import AskOtherWorkSelector from '../components/result/AskOtherWorkSelector';
+import { useAnalyze } from '../hooks/useAnalyze';
 import InfoIcon from '@mui/icons-material/Info';
 import Footer from '../components/default/Footer';
 
 export default function MainPage() {
-    const [viewState, setViewState] = useState('input'); // 'input', 'loading', 'result'
+    const [viewState, setViewState] = useState('input'); // 'input', 'loading', 'completed'
     const [inputType, setInputType] = useState('text'); // 'text', 'pdf', 'image'
+    const [adminSummary, setAdminSummary] = useState('');
     const [textInput, setTextInput] = useState('');
     const [file, setFile] = useState(null);
-    const [output, setOutput] = useState('');
     const [isIntroModalOpen, setIsIntroModalOpen] = useState(false);
 
-    // Load state from sessionStorage on mount
+    // 1차/2차 답변 분리 저장
+    const [firstResponse, setFirstResponse] = useState(null);  // { plain_summary, references }
+    const [secondResponse, setSecondResponse] = useState(null); // { plain_summary, references }
+    const [questionCount, setQuestionCount] = useState(0); // 0: 미질문, 1: 1차 완료, 2: 2차 완료
+    const [showReferences, setShowReferences] = useState(false); // "네" 선택 시 references 표시
+
+    // SSE 기반 분석 API 훅 사용
+    const { fetchAnalyze, fetchRetryAnalyze, reset: resetApi, phase } = useAnalyze();
+
     // Load state from sessionStorage and IndexedDB on mount
     React.useEffect(() => {
         const savedState = sessionStorage.getItem('appState');
@@ -31,7 +43,11 @@ export default function MainPage() {
                 if (parsedState.viewState) setViewState(parsedState.viewState);
                 if (parsedState.inputType) setInputType(parsedState.inputType);
                 if (parsedState.textInput) setTextInput(parsedState.textInput);
-                if (parsedState.output) setOutput(parsedState.output);
+                if (parsedState.adminSummary) setAdminSummary(parsedState.adminSummary);
+                if (parsedState.firstResponse) setFirstResponse(parsedState.firstResponse);
+                if (parsedState.secondResponse) setSecondResponse(parsedState.secondResponse);
+                if (parsedState.questionCount !== undefined) setQuestionCount(parsedState.questionCount);
+                if (parsedState.showReferences !== undefined) setShowReferences(parsedState.showReferences);
             } catch (e) {
                 console.error("Failed to load state:", e);
                 sessionStorage.removeItem('appState');
@@ -51,10 +67,13 @@ export default function MainPage() {
                 viewState,
                 inputType,
                 textInput,
-                output,
+                adminSummary,
+                firstResponse,
+                secondResponse,
+                questionCount,
+                showReferences,
             };
 
-            // Save metadata to sessionStorage
             try {
                 sessionStorage.setItem('appState', JSON.stringify(stateToSave));
             } catch (e) {
@@ -72,7 +91,7 @@ export default function MainPage() {
         const timeoutId = setTimeout(_saveState, 500); // Debounce saves
         return () => clearTimeout(timeoutId);
 
-    }, [viewState, inputType, textInput, file, output]);
+    }, [viewState, inputType, textInput, file, adminSummary, firstResponse, secondResponse, questionCount, showReferences]);
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0];
@@ -88,43 +107,110 @@ export default function MainPage() {
         // We can optionally clear storage here, but the useEffect will update it soon anyway with nulls
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         setViewState('loading');
 
-        // Mock API call simulation
-        setTimeout(() => {
-            let result = '분석 결과:\n\n';
-            if (inputType === 'text' && textInput) {
-                result += `입력하신 텍스트에 대한 분석 결과입니다.\n내용이 충실하며 복지 헤택 적용 가능성이 높습니다.`;
-            } else if ((inputType === 'pdf' || inputType === 'image') && file) {
-                result += `업로드하신 파일(${file.name}) 분석 결과입니다.\n문서 내용을 바탕으로 맞춤형 정보를 제공합니다.`;
-            } else {
-                result += `데이터가 입력되지 않았습니다.`;
+        try {
+            // SSE 기반 API 호출 (1차 질의)
+            const response = await fetchAnalyze();
+
+            if (response && response.status === 'completed' && response.data) {
+                // 1차 답변 저장
+                setFirstResponse({
+                    plain_summary: response.data.plain_summary,
+                    references: response.data.references || []
+                });
+                // 재질의를 위해 admin_summary를 저장
+                setAdminSummary(response.data.admin_summary);
+                setQuestionCount(1);
+                setViewState('completed');
             }
-            setOutput(result);
-            setViewState('result');
-        }, 1500);
+        } catch (err) {
+            console.error('API 호출 오류:', err);
+            setFirstResponse({
+                plain_summary: `오류가 발생했습니다: ${err.message}`,
+                references: []
+            });
+            setQuestionCount(1);
+            setViewState('completed');
+        }
+    };
+
+    const handleRetryQuestion = async () => {
+        // 2차까지만 허용
+        if (questionCount >= 2) return;
+
+        setViewState('loading');
+
+        try {
+            // 저장된 adminSummary를 사용하여 2차 질의 (답변 재생성)
+            const response = await fetchRetryAnalyze(adminSummary);
+
+            if (response && response.status === 'completed' && response.data) {
+                // 2차 답변 저장
+                setSecondResponse({
+                    plain_summary: response.data.plain_summary
+                });
+                setQuestionCount(2);
+                setViewState('completed');
+            }
+        } catch (err) {
+            console.error('2차 질의 API 호출 오류:', err);
+            setSecondResponse({
+                plain_summary: `오류가 발생했습니다: ${err.message}`,
+                references: []
+            });
+            setQuestionCount(2);
+            setViewState('completed');
+        }
     };
 
     const handleRetry = () => {
         setViewState('input');
-        setOutput('');
+        setAdminSummary('');
         setTextInput('');
         setFile(null);
+        setFirstResponse(null);
+        setSecondResponse(null);
+        setQuestionCount(0);
+        setShowReferences(false);
+        resetApi(); // API 상태 초기화
         sessionStorage.removeItem('appState'); // Clear stored state on retry
         del('uploadedFile'); // Clear file from IDB
     };
 
+    // 보건복지상담센터(129) 페이지로 이동
+    const handleGoToWelfareCenter = () => {
+        window.open('https://www.129.go.kr/', '_blank', 'noopener,noreferrer');
+    };
+
+    // "네, 충분해요" 선택 시 - references 표시
+    const handleSatisfied = () => {
+        setShowReferences(true);
+    };
+
     return (
         <div className="main-page-container relative pb-[100px]">
-            {/* 서비스 소개 버튼 (우측 상단 고정, 고스트 버튼 스타일 적용) */}
-            <div className="absolute top-6 right-6 z-10">
-                <GhostButton
-                    label="서비스 소개"
-                    Icon={InfoIcon}
-                    onClick={() => setIsIntroModalOpen(true)}
-                    isLight={true}
-                />
+            {/* 서비스 소개 버튼 - 모바일: 하단 파란색 원형, 데스크탑: 상단 우측 텍스트 */}
+            <div className="service-intro-btn-container">
+                {/* 모바일: 파란색 원형 FAB (sm 미만) */}
+                <div className="sm:hidden">
+                    <GhostButton
+                        label="서비스 소개"
+                        Icon={InfoIcon}
+                        onClick={() => setIsIntroModalOpen(true)}
+                        isFab={true}
+                    />
+                </div>
+                {/* 데스크탑: 텍스트 포함 (sm 이상) */}
+                <div className="hidden sm:block">
+                    <GhostButton
+                        label="서비스 소개"
+                        Icon={InfoIcon}
+                        onClick={() => setIsIntroModalOpen(true)}
+                        isLight={true}
+                    />
+                </div>
             </div>
 
             {/* 서비스 소개 모달 */}
@@ -173,7 +259,7 @@ export default function MainPage() {
                     )}
 
                     {/* 로딩 및 결과 모드 (요약 항상 표시) */}
-                    {(viewState === 'loading' || viewState === 'result') && (
+                    {(viewState === 'loading' || viewState === 'completed') && (
                         <>
                             <UserQuerySummary
                                 type={inputType}
@@ -183,30 +269,64 @@ export default function MainPage() {
 
                             {/* 로딩 중일 때 스피너 표시 */}
                             {viewState === 'loading' && (
-                                <LoadingSpinner />
-                            )}
-
-                            {/* 결과 나왔을 때 버튼 표시 */}
-                            {viewState === 'result' && (
-                                <button
-                                    onClick={handleRetry}
-                                    className="action-button mode-button-inactive"
-                                >
-                                    다시 질문하기
-                                </button>
+                                <LoadingSpinner phase={phase} />
                             )}
                         </>
                     )}
                 </div>
 
                 {/* 결과 섹션 - 카드 외부 하단에 배치 */}
-                {viewState === 'result' && (
+                {viewState === 'completed' && (
                     <div className="mt-6 animate-fade-in-up">
-                        <ResultDisplay result={output} />
+                        {/* 1차 답변 */}
+                        {firstResponse && (
+                            <ResultDisplay
+                                result={firstResponse.plain_summary}
+                                references={firstResponse.references}
+                                label="1차 답변"
+                                isFirst={true}
+                            />
+                        )}
+
+                        {/* 2차 답변 */}
+                        {secondResponse && (
+                            <div className="mt-4">
+                                <ResultDisplay
+                                    result={secondResponse.plain_summary}
+                                    references={secondResponse.references}
+                                    label="2차 답변"
+                                    isFirst={false}
+                                />
+                            </div>
+                        )}
                     </div>
                 )}
-            </div>
 
+                {/* 피드백 선택 - 2차 미만이고 아직 "네" 선택 안 했을 때 */}
+                {viewState === 'completed' && questionCount < 2 && !showReferences && (
+                    <div className="mt-6 animate-fade-in-up">
+                        <FeedbackLoopSelector
+                            onYes={handleSatisfied}
+                            onNo={handleRetryQuestion}
+                        />
+                    </div>
+                )}
+
+                {/* "네" 선택 시 또는 2차 완료 후 reference 링크 안내 */}
+                {viewState === 'completed' && (showReferences || questionCount >= 2) && (
+                    <>
+                        <ServiceReference
+                            references={firstResponse?.references || []}
+                        />
+                        <div className="mt-3 animate-fade-in-up">
+                            <AskOtherWorkSelector
+                                onRetry={handleRetry}
+                                onOtherWork={handleGoToWelfareCenter}
+                            />
+                        </div>
+                    </>
+                )}
+            </div>
             <Footer />
         </div>
     );
