@@ -19,6 +19,8 @@ venv/
 .venv/
 env/
 ENV/
+backend/venv/
+backend/.venv/
 
 # Distribution / packaging
 build/

@@ -7,10 +7,15 @@ import InputModeSelector from '../components/input/InputModeSelector';
 import TextInput from '../components/input/TextInput';
 import ImageUploader from '../components/input/ImageUploader';
 import UserQuerySummary from '../components/result/UserQuerySummary';
+import ServiceIntroModal from '../components/default/ServiceIntroModal';
+import GhostButton from '../components/ui/GhostButton';
 import LoadingSpinner from '../components/result/LoadingSpinner';
 import ServiceReference from '../components/result/ServiceReference';
 import FeedbackLoopSelector from '../components/result/FeedbackLoopSelector';
+import AskOtherWorkSelector from '../components/result/AskOtherWorkSelector';
 import { useAnalyze } from '../hooks/useAnalyze';
+import InfoIcon from '@mui/icons-material/Info';
+import Footer from '../components/default/Footer';
 
 export default function MainPage() {
     const [viewState, setViewState] = useState('input'); // 'input', 'loading', 'completed'
@@ -18,6 +23,7 @@ export default function MainPage() {
     const [adminSummary, setAdminSummary] = useState('');
     const [textInput, setTextInput] = useState('');
     const [file, setFile] = useState(null);
+    const [isIntroModalOpen, setIsIntroModalOpen] = useState(false);
 
     // 1차/2차 답변 분리 저장
     const [firstResponse, setFirstResponse] = useState(null);  // { plain_summary, references }
@@ -173,13 +179,46 @@ export default function MainPage() {
         del('uploadedFile'); // Clear file from IDB
     };
 
+    // 보건복지상담센터(129) 페이지로 이동
+    const handleGoToWelfareCenter = () => {
+        window.open('https://www.129.go.kr/', '_blank', 'noopener,noreferrer');
+    };
+
     // "네, 충분해요" 선택 시 - references 표시
     const handleSatisfied = () => {
         setShowReferences(true);
     };
 
     return (
-        <div className="main-page-container">
+        <div className="main-page-container relative pb-[100px]">
+            {/* 서비스 소개 버튼 - 모바일: 하단 파란색 원형, 데스크탑: 상단 우측 텍스트 */}
+            <div className="service-intro-btn-container">
+                {/* 모바일: 파란색 원형 FAB (sm 미만) */}
+                <div className="sm:hidden">
+                    <GhostButton
+                        label="서비스 소개"
+                        Icon={InfoIcon}
+                        onClick={() => setIsIntroModalOpen(true)}
+                        isFab={true}
+                    />
+                </div>
+                {/* 데스크탑: 텍스트 포함 (sm 이상) */}
+                <div className="hidden sm:block">
+                    <GhostButton
+                        label="서비스 소개"
+                        Icon={InfoIcon}
+                        onClick={() => setIsIntroModalOpen(true)}
+                        isLight={true}
+                    />
+                </div>
+            </div>
+
+            {/* 서비스 소개 모달 */}
+            <ServiceIntroModal
+                isOpen={isIntroModalOpen}
+                onClose={() => setIsIntroModalOpen(false)}
+            />
+
             <div className="w-full max-w-lg">
                 <div className="unified-card">
                     {/* 타이틀 (항상 표시) */}
@@ -232,18 +271,6 @@ export default function MainPage() {
                             {viewState === 'loading' && (
                                 <LoadingSpinner phase={phase} />
                             )}
-
-                            {/* 결과 나왔을 때 버튼 표시 */}
-                            {viewState === 'completed' && (
-                                <div className="flex gap-3 justify-center w-full">
-                                    <button
-                                        onClick={handleRetry}
-                                        className="action-button mode-button-inactive flex-1"
-                                    >
-                                        다른 질문하기
-                                    </button>
-                                </div>
-                            )}
                         </>
                     )}
                 </div>
@@ -287,11 +314,20 @@ export default function MainPage() {
 
                 {/* "네" 선택 시 또는 2차 완료 후 reference 링크 안내 */}
                 {viewState === 'completed' && (showReferences || questionCount >= 2) && (
-                    <ServiceReference
-                        references={firstResponse?.references || []}
-                    />
+                    <>
+                        <ServiceReference
+                            references={firstResponse?.references || []}
+                        />
+                        <div className="mt-3 animate-fade-in-up">
+                            <AskOtherWorkSelector
+                                onRetry={handleRetry}
+                                onOtherWork={handleGoToWelfareCenter}
+                            />
+                        </div>
+                    </>
                 )}
             </div>
+            <Footer />
         </div>
     );
 }
