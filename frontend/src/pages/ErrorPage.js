@@ -113,7 +113,7 @@ export default function ErrorPage({ statusCode = 404, onHome, onBack }) {
                                 href="mailto:support@easywelfare.com" 
                                 className="text-blue-600 hover:underline font-semibold text-xs"
                             >
-                                고객 지원팀에 문의하기
+                                문의하기
                             </a>
                         </p>
                     </div>
