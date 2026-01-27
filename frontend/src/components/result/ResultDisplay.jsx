@@ -1,8 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from "react-markdown";
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
 export default function ResultDisplay({ result, references = [], label = "답변", isFirst = true }) {
+    const [copied, setCopied] = useState(false);
+
     if (!result) return null;
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(result);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('복사 실패:', err);
+        }
+    };
 
     return (
         <div className={`bg-white rounded-lg shadow-md p-6 ${!isFirst ? 'border-l-4 border-blue-500' : ''}`}>
@@ -21,6 +34,18 @@ export default function ResultDisplay({ result, references = [], label = "답변
                     {result}
                 </ReactMarkdown>
             </div>
+            <button
+                onClick={handleCopy}
+                className={`w-full py-2 rounded-lg font-medium mt-3 transition-colors flex items-center justify-center gap-2 text-sm ${
+                    copied
+                        ? 'bg-gray-400 text-white cursor-default'
+                        : 'bg-[#1C8BE7] text-white hover:bg-[#1a7ed4]'
+                }`}
+                disabled={copied}
+            >
+                <ContentCopyIcon sx={{ fontSize: 16 }} />
+                {copied ? '복사 완료' : '복사'}
+            </button>
         </div>
     );
 }

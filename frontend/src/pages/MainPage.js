@@ -17,7 +17,7 @@ import { useAnalyze } from '../hooks/useAnalyze';
 import InfoIcon from '@mui/icons-material/Info';
 import Footer from '../components/default/Footer';
 
-export default function MainPage() {
+export default function MainPage({ onError }) {
     const [viewState, setViewState] = useState('input'); // 'input', 'loading', 'completed'
     const [inputType, setInputType] = useState('text'); // 'text', 'pdf', 'image'
     const [adminSummary, setAdminSummary] = useState('');
@@ -127,12 +127,11 @@ export default function MainPage() {
             }
         } catch (err) {
             console.error('API 호출 오류:', err);
-            setFirstResponse({
-                plain_summary: `오류가 발생했습니다: ${err.message}`,
-                references: []
-            });
-            setQuestionCount(1);
-            setViewState('completed');
+            // HTTP 상태 코드가 있으면 해당 코드로, 없으면 500으로 에러 페이지 표시
+            const statusCode = err.status || 500;
+            if (onError) {
+                onError(statusCode);
+            }
         }
     };
 
@@ -156,12 +155,11 @@ export default function MainPage() {
             }
         } catch (err) {
             console.error('2차 질의 API 호출 오류:', err);
-            setSecondResponse({
-                plain_summary: `오류가 발생했습니다: ${err.message}`,
-                references: []
-            });
-            setQuestionCount(2);
-            setViewState('completed');
+            // HTTP 상태 코드가 있으면 해당 코드로, 없으면 500으로 에러 페이지 표시
+            const statusCode = err.status || 500;
+            if (onError) {
+                onError(statusCode);
+            }
         }
     };
 

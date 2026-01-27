@@ -3,7 +3,6 @@ import TextSnippetIcon from '@mui/icons-material/TextSnippet';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import CloseIcon from '@mui/icons-material/Close';
-import DownloadIcon from '@mui/icons-material/Download';
 
 export default function UserQuerySummary({ type, text, file }) {
     const [isExpanded, setIsExpanded] = useState(false);
