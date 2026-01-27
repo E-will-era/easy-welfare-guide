@@ -1,8 +1,18 @@
 import React from 'react';
+import { del } from 'idb-keyval';
 
-export default function ErrorPage({ statusCode = 404, onHome, onBack }) {
-    const handleHome = onHome || (() => window.location.href = '/');
-    const handleBack = onBack || (() => window.history.back());
+export default function ErrorPage({ statusCode = 404, onHome }) {
+    const handleHome = () => {
+        // 모든 상태 초기화
+        sessionStorage.removeItem('appState');
+        del('uploadedFile').catch(() => {});
+
+        if (onHome) {
+            onHome();
+        } else {
+            window.location.href = '/';
+        }
+    };
 
     const errorDetails = {
         404: {
@@ -25,7 +35,7 @@ export default function ErrorPage({ statusCode = 404, onHome, onBack }) {
             suggestions: [
                 '잠시 후 다시 시도해주세요',
                 '브라우저를 새로고침(F5)해주세요',
-                '문제가 계속되면 고객 지원팀에 문의하세요'
+                '문제가 계속되면 메일로 이슈를 알려주세요.'
             ],
             color: 'from-red-500 to-red-600'
         },
@@ -94,12 +104,6 @@ export default function ErrorPage({ statusCode = 404, onHome, onBack }) {
                             className="w-full px-6 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg hover:shadow-xl text-sm"
                         >
                             🏠 홈으로 돌아가기
-                        </button>
-                        <button
-                            onClick={handleBack}
-                            className="w-full px-6 py-2 bg-gray-200 text-gray-800 font-bold rounded-lg hover:bg-gray-300 transition-all text-sm"
-                        >
-                            ← 이전 페이지
                         </button>
                     </div>
 
