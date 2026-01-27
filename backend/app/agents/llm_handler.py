@@ -152,7 +152,7 @@ Return only the following JSON structure:
         system_prompt = await self._load_system_prompt("summarizer")
         
         response = await self.client.chat.completions.create(
-            model=settings.AZURE_OPENAI_MODEL,
+            model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content}
@@ -183,7 +183,7 @@ Return only the following JSON structure:
 """
         
         response = await self.client.chat.completions.create(
-            model=settings.AZURE_OPENAI_MODEL,
+            model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
@@ -218,7 +218,7 @@ Return only the following JSON structure:
 """
         
         response = await self.client.chat.completions.create(
-            model=settings.AZURE_OPENAI_MODEL,
+            model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
