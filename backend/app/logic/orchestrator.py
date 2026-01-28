@@ -25,9 +25,6 @@ class WelfareOrchestrator:
         task_id = uuid.uuid4().hex
         total_start_time = time.perf_counter()
 
-        # 현재 실행 중인 단계를 추적하기 위한 변수
-        current_phase = "init"
-        
         try:
             # 1. 이미지 처리 후 텍스트 추출 과정
             step_start = time.perf_counter()
@@ -38,7 +35,13 @@ class WelfareOrchestrator:
             logger.info(f"[Phase 1] image2text: {time.perf_counter() - step_start:.2f}s")
             
             if not extracted_text:
-                yield self._format_sse("error", {"message": "텍스트 추출 실패"})
+                yield self._format_sse("error", {
+                    "status": "failed",
+                    "data": {
+                        "phase": "close",
+                        "message": "이미지에서 텍스트를 추출하지 못했습니다."
+                    }
+                })
                 return
 
             # 2. 서비스 관련 내용인지 검증
@@ -46,7 +49,13 @@ class WelfareOrchestrator:
             is_welfare = await self._check_welfare_relevance(extracted_text)
 
             if not is_welfare:
-                yield self._format_sse("error", {"message": "복지 관련 문서가 아닙니다."})
+                yield self._format_sse("error", {
+                    "status": "failed",
+                    "data": {
+                        "phase": "close",
+                        "message": "복지 관련 이미지가 아닙니다."
+                    }
+                })
                 return
 
             logger.info(f"[Phase 2] validate: {time.perf_counter() - step_start:.2f}s")
@@ -54,67 +63,77 @@ class WelfareOrchestrator:
             yield self._format_sse("progress", {
                 "status": "pending", 
                 "data": {
-                    "phase": "validate"
+                    "phase": "relevance"
                 }
             })
 
             # 3. RAG 검색
-            current_phase = "search"
             step_start = time.perf_counter()
 
             search_query = await self._generate_search_query(extracted_text)
             rag_results = await self.rag.search(search_query, top_k=3)
+            
+            # [🔍 디버깅용 로그 추가]
+            logger.info(f"🧐 생성된 검색 쿼리: [{search_query}]")
+            logger.info(f"🔍 검색된 문서 개수: {len(rag_results)}개") # <--- 이 로그 확인 필요
+            logger.info(f"🔍 검색 결과 상세: {json.dumps(rag_results, ensure_ascii=False, default=str)}")
+
             context_text = "\n".join([f"- {doc['content']}" for doc in rag_results])
 
-            logger.info(f"[Step 3] {current_phase}: {time.perf_counter() - step_start:.2f}s")
+            logger.info(f"[Step 3] RAG를 검색합니다: {time.perf_counter() - step_start:.2f}s")
             
             yield self._format_sse("progress", {
                 "status": "processing", 
                 "data": {
-                    "phase": current_phase
+                    "phase": "search"
                 }
             })
 
             # 3. 추출된 텍스트와 RAG 문서로 내용 요약
-            current_phase = 'summarize'
             step_start = time.perf_counter()
             admin_summary = await self._create_admin_summary(extracted_text, context_text)
 
-            logger.info(f"[Step 4] {current_phase}: {time.perf_counter() - step_start:.2f}s")
+            logger.info(f"[Step 4] 이미지에서 추출한 텍스트와 RAG에서 검색된 문서를 요약합니다: {time.perf_counter() - step_start:.2f}s")
             
             yield self._format_sse("progress", {
                 "status": "processing", 
                 "data": {
-                    "phase": current_phase
+                    "phase": "summarize"
                 }
             })
 
             # 4. 요악된 용어를 순화어로 제공
-            current_phase = 'translate'
             step_start = time.perf_counter()
             plain_summary = await self._create_plain_summary(admin_summary)
 
-            logger.info(f"[Step 5] {current_phase}: {time.perf_counter() - step_start:.2f}s")
+            logger.info(f"[Step 5] 요악된 내용에서 행정 용어를 순화어로 변환합닌다: {time.perf_counter() - step_start:.2f}s")
             
             yield self._format_sse("progress", {
                 "status": "processing", 
                 "data": {
-                    "phase": current_phase
+                    "phase": "translate"
                 }
             })
 
             # --- [Step 7] 검증 ---
-            current_phase = 'validate'
             step_start = time.perf_counter()
             validation_result = await self._validate_summaries(admin_summary, plain_summary)
 
-            logger.info(f"[Step 6] {current_phase}: {time.perf_counter() - step_start:.2f}s")
+            logger.info(f"[Step 6] 행정 용어와 순화어로 변환된 요약 내용이 일치하는지 검증합니다: {time.perf_counter() - step_start:.2f}s")
             
             if not validation_result['passed']:
                 logger.warning(f"검증 경고: {validation_result.get('reason')}")
+            
+            yield self._format_sse("progress", {
+                "status": "processing", 
+                "data": {
+                    "phase": "validate"
+                }
+            })
 
             # --- [Step 8] 최종 결과 전송 ---
             references = []
+
             for res in rag_results:
                 meta = res.get("metadata", {})
                 references.append({
@@ -123,7 +142,7 @@ class WelfareOrchestrator:
                 })
 
             final_data = {
-                "task_id": uuid.uuid4().hex,
+                "task_id": task_id,
                 "admin_summary": admin_summary,
                 "plain_summary": plain_summary,
                 "references": references,
@@ -136,7 +155,14 @@ class WelfareOrchestrator:
 
         except Exception as e:
             logger.error(f"Streaming Error: {str(e)}")
-            yield self._format_sse("error", {"message": f"서버 오류: {str(e)}"})
+
+            yield self._format_sse("error", {
+                "status": "failed", 
+                "data": {
+                    "phase": "error",
+                    "message": f"서버 오류: {str(e)}"
+                }
+            })
 
     def _format_sse(self, event_type: str, data: Dict) -> str:
         """데이터를 SSE 포맷 문자열로 변환"""
@@ -180,7 +206,7 @@ class WelfareOrchestrator:
         response = await self.llm_handler.client.chat.completions.create(
             model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
             messages=[
-                {"role": "system", "content": "텍스트에서 복지 정책 검색을 위한 핵심 키워드 3개를 추출하여 공백으로 구분해 주세요."},
+                {"role": "system", "content": "텍스트에서 복지 정책 검색을 위한 핵심 키워드 추출하여 공백으로 구분해 주세요."},
                 {"role": "user", "content": text[:1000]}
             ],
             temperature=0.0
