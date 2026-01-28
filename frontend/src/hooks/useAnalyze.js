@@ -1,12 +1,11 @@
 import { useState, useCallback, useRef } from 'react';
-import { apiPost, subscribeSSE } from '../Api.js';
 
 // API 엔드포인트
-const START_API_URL = '/api/v1/test/analyze/start';
+const ANALYZE_API_URL = '/api/v1/welfare/analyze';
 
 /**
- * SSE 기반 분석 API 호출 훅
- * POST /api/v1/test/analyze/start → GET /api/v1/test/analyze/{task_id}/stream
+ * SSE 기반 복지 문서 분석 API 호출 훅
+ * POST /api/v1/welfare/analyze (multipart/form-data) → SSE 스트리밍 응답
  *
  * @returns {object} - { data, loading, error, phase, fetchAnalyze, reset }
  */
@@ -16,51 +15,102 @@ export function useAnalyze() {
     const [error, setError] = useState(null);
     const [phase, setPhase] = useState(null); // 현재 진행 단계
 
-    const unsubscribeRef = useRef(null);
+    const abortControllerRef = useRef(null);
 
     /**
-     * 분석 시작 및 SSE 스트림 구독
-     * @returns {Promise<void>}
+     * 파일 업로드 및 SSE 스트림 분석
+     * @param {File} file - 분석할 파일
+     * @returns {Promise<object>}
      */
-    const fetchAnalyze = useCallback(async () => {
+    const fetchAnalyze = useCallback(async (file) => {
+        if (!file) {
+            throw new Error('파일이 필요합니다.');
+        }
+
         setLoading(true);
         setError(null);
         setPhase(null);
         setData(null);
 
-        try {
-            // 1. 분석 시작 요청
-            const response = await apiPost(START_API_URL, {});
+        // 이전 요청 취소
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
 
-            if (response.status !== 'pending' || !response.data?.task_id) {
-                throw new Error('분석 시작 요청 실패');
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch(ANALYZE_API_URL, {
+                method: 'POST',
+                body: formData,
+                signal: abortControllerRef.current.signal,
+            });
+
+            if (!response.ok) {
+                throw new Error(`서버 오류: ${response.status}`);
             }
 
-            const { sse_stream_uri } = response.data;
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let finalData = null;
 
-            // 2. SSE 스트림 구독
             return new Promise((resolve, reject) => {
-                unsubscribeRef.current = subscribeSSE(sse_stream_uri, {
-                    onMessage: (data) => {
-                        // 진행 상태 업데이트
-                        if (data.status === 'processing' && data.data?.phase) {
-                            setPhase(data.data.phase);
+                const processStream = async () => {
+                    try {
+                        while (true) {
+                            const { done, value } = await reader.read();
+
+                            if (done) {
+                                setPhase('completed');
+                                setLoading(false);
+                                resolve(finalData);
+                                break;
+                            }
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop() || '';
+
+                            for (const line of lines) {
+                                if (line.startsWith('data: ')) {
+                                    try {
+                                        const jsonData = JSON.parse(line.slice(6));
+
+                                        // phase 업데이트
+                                        if (jsonData.phase) {
+                                            setPhase(jsonData.phase);
+                                        }
+
+                                        // 최종 데이터 저장
+                                        if (jsonData.status === 'completed' || jsonData.result) {
+                                            finalData = jsonData;
+                                            setData(jsonData);
+                                        }
+                                    } catch (parseErr) {
+                                        // JSON 파싱 실패 시 무시
+                                    }
+                                }
+                            }
                         }
-                    },
-                    onError: (err) => {
-                        setError(err.message);
+                    } catch (streamErr) {
+                        if (streamErr.name === 'AbortError') {
+                            return;
+                        }
+                        setError(streamErr.message);
                         setLoading(false);
-                        reject(err);
-                    },
-                    onComplete: (completedData) => {
-                        setData(completedData);
-                        setPhase('completed');
-                        setLoading(false);
-                        resolve(completedData);
-                    },
-                });
+                        reject(streamErr);
+                    }
+                };
+
+                processStream();
             });
         } catch (err) {
+            if (err.name === 'AbortError') {
+                return;
+            }
             setError(err.message || 'API 요청 중 오류가 발생했습니다.');
             setLoading(false);
             throw err;
@@ -68,12 +118,12 @@ export function useAnalyze() {
     }, []);
 
     /**
-     * 상태 초기화 및 SSE 구독 해제
+     * 상태 초기화 및 요청 취소
      */
     const reset = useCallback(() => {
-        if (unsubscribeRef.current) {
-            unsubscribeRef.current();
-            unsubscribeRef.current = null;
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
         }
         setData(null);
         setLoading(false);
