@@ -18,7 +18,7 @@ export default function MainPage() {
     const [inputType, setInputType] = useState('text'); // 'text', 'pdf', 'image'
     const [textInput, setTextInput] = useState('');
     const [file, setFile] = useState(null);
-    const [output, setOutput] = useState('');
+    const [output, setOutput] = useState([]);
     const [isIntroModalOpen, setIsIntroModalOpen] = useState(false);
 
     // Load state from sessionStorage on mount
@@ -91,24 +91,56 @@ export default function MainPage() {
     const handleSubmit = () => {
         setViewState('loading');
 
-        // Mock API call simulation
+        // Mock API call simulation - 실제 연동 시 useAnalyze 훅 사용
         setTimeout(() => {
-            let result = '분석 결과:\n\n';
+            let paragraphs = [];
             if (inputType === 'text' && textInput) {
-                result += `입력하신 텍스트에 대한 분석 결과입니다.\n내용이 충실하며 복지 헤택 적용 가능성이 높습니다.`;
+                // 텍스트를 문단별로 분리 (빈 줄 또는 줄바꿈 기준)
+                const rawParagraphs = textInput
+                    .split(/\n\s*\n|\n/)  // 빈 줄 또는 줄바꿈으로 분리
+                    .map(p => p.trim())
+                    .filter(p => p.length > 0);  // 빈 문단 제거
+
+                // 각 문단을 카드로 변환 (topic은 백엔드 API에서 추출 예정)
+                paragraphs = rawParagraphs.map((content, index) => ({
+                    topic: `문단 ${index + 1}의 중심 주제`,  // 백엔드 연동 시 AI가 추출
+                    content: content
+                }));
+
+                // 문단이 없으면 전체 텍스트를 하나의 카드로
+                if (paragraphs.length === 0) {
+                    paragraphs = [{
+                        topic: '입력 내용',
+                        content: textInput
+                    }];
+                }
             } else if ((inputType === 'pdf' || inputType === 'image') && file) {
-                result += `업로드하신 파일(${file.name}) 분석 결과입니다.\n문서 내용을 바탕으로 맞춤형 정보를 제공합니다.`;
+                paragraphs = [
+                    {
+                        topic: '문서 정보',
+                        content: `업로드하신 파일(${file.name})을 성공적으로 분석했습니다.`
+                    },
+                    {
+                        topic: '주요 내용 요약',
+                        content: '문서 내용을 바탕으로 맞춤형 정보를 제공합니다.'
+                    }
+                ];
             } else {
-                result += `데이터가 입력되지 않았습니다.`;
+                paragraphs = [
+                    {
+                        topic: '알림',
+                        content: '데이터가 입력되지 않았습니다.'
+                    }
+                ];
             }
-            setOutput(result);
+            setOutput(paragraphs);
             setViewState('result');
         }, 1500);
     };
 
     const handleRetry = () => {
         setViewState('input');
-        setOutput('');
+        setOutput([]);
         setTextInput('');
         setFile(null);
         sessionStorage.removeItem('appState'); // Clear stored state on retry
@@ -202,7 +234,7 @@ export default function MainPage() {
                 {/* 결과 섹션 - 카드 외부 하단에 배치 */}
                 {viewState === 'result' && (
                     <div className="mt-6 animate-fade-in-up">
-                        <ResultDisplay result={output} />
+                        <ResultDisplay paragraphs={output} />
                     </div>
                 )}
             </div>
