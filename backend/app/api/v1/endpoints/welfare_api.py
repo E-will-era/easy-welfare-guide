@@ -1,60 +1,24 @@
-from fastapi import APIRouter, HTTPException
-from app.schemas.summary import SummaryRequest, SummaryResponse
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse  # [필수] 추가
 from app.logic.orchestrator import WelfareOrchestrator
 
 router = APIRouter()
-
-# 오케스트레이터 인스턴스 생성 (비즈니스 로직 관리)
 orchestrator = WelfareOrchestrator()
 
-@router.post("/analyze", response_model=SummaryResponse)
-async def process_welfare_guide(request: SummaryRequest):
+@router.post("/analyze")
+async def analyze_welfare_document(file: UploadFile = File(...)):
     """
-    복지 정보 처리 엔드포인트
-    - 요약 → 정제 → 검증 파이프라인 실행
+    [SSE] 복지 문서 분석 실시간 스트리밍 API
     """
     try:
-        # 오케스트레이터를 통해 전체 파이프라인 실행
-        result = await orchestrator.process(request.content)
+        contents = await file.read()
         
-        return SummaryResponse(
-            summary=result,
-            status="success"
+        # [수정됨] await orchestrator.process_welfare_flow(...) 라고 쓰면 에러가 납니다!
+        # 대신 StreamingResponse에 제너레이터 함수 자체를 넘겨줘야 합니다.
+        return StreamingResponse(
+            orchestrator.stream_welfare_flow(contents), # 함수 호출 결과를 바로 전달 (await 없음)
+            media_type="text/event-stream"
         )
-    except FileNotFoundError as e:
-        raise HTTPException(
-            status_code=404,
-            detail=f"프롬프트 파일을 찾을 수 없습니다: {str(e)}"
-        )
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"처리 중 오류가 발생했습니다: {str(e)}"
-        )
-
-@router.post("/summarize", response_model=SummaryResponse)
-async def summarize_only(request: SummaryRequest):
-    """요약만 수행"""
-    try:
-        result = await orchestrator.summarize(request.content)
-        return SummaryResponse(summary=result, status="success")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/refine", response_model=SummaryResponse)
-async def refine_only(request: SummaryRequest):
-    """정제만 수행"""
-    try:
-        result = await orchestrator.refine(request.content)
-        return SummaryResponse(summary=result, status="success")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/validate", response_model=SummaryResponse)
-async def validate_only(request: SummaryRequest):
-    """검증만 수행"""
-    try:
-        result = await orchestrator.validate(request.content, request.content)  # ✅ 2개 인자
-        return SummaryResponse(summary=result, status="success")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"서버 오류: {str(e)}")
