@@ -1,11 +1,14 @@
 import { useState, useCallback, useRef } from 'react';
 
+// API 기본 URL
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 // API 엔드포인트
-const ANALYZE_API_URL = '/api/v1/welfare/analyze';
+const ANALYZE_API_URL = `${API_BASE_URL}/api/v1/analyze`;
 
 /**
  * SSE 기반 복지 문서 분석 API 호출 훅
- * POST /api/v1/welfare/analyze (multipart/form-data) → SSE 스트리밍 응답
+ * POST /api/v1/analyze (multipart/form-data) → SSE 스트리밍 응답
  *
  * @returns {object} - { data, loading, error, phase, fetchAnalyze, reset }
  */
@@ -60,6 +63,8 @@ export function useAnalyze() {
             return new Promise((resolve, reject) => {
                 const processStream = async () => {
                     try {
+                        let currentEvent = null;
+
                         while (true) {
                             const { done, value } = await reader.read();
 
@@ -75,23 +80,41 @@ export function useAnalyze() {
                             buffer = lines.pop() || '';
 
                             for (const line of lines) {
+                                // event 타입 파싱
+                                if (line.startsWith('event: ')) {
+                                    currentEvent = line.slice(7).trim();
+                                    continue;
+                                }
+
+                                // data 파싱
                                 if (line.startsWith('data: ')) {
                                     try {
                                         const jsonData = JSON.parse(line.slice(6));
 
-                                        // phase 업데이트
-                                        if (jsonData.phase) {
-                                            setPhase(jsonData.phase);
+                                        // progress 이벤트: phase 업데이트
+                                        if (currentEvent === 'progress' && jsonData.data?.phase) {
+                                            setPhase(jsonData.data.phase);
                                         }
 
-                                        // 최종 데이터 저장
-                                        if (jsonData.status === 'completed' || jsonData.result) {
+                                        // completed 이벤트: 최종 데이터 저장
+                                        if (currentEvent === 'completed') {
                                             finalData = jsonData;
                                             setData(jsonData);
+                                            setPhase('completed');
+                                        }
+
+                                        // error 이벤트: 에러 처리
+                                        if (currentEvent === 'error') {
+                                            const errorMsg = jsonData.data?.message || '처리 중 오류가 발생했습니다.';
+                                            setError(errorMsg);
+                                            setLoading(false);
+                                            reject(new Error(errorMsg));
+                                            return;
                                         }
                                     } catch (parseErr) {
                                         // JSON 파싱 실패 시 무시
                                     }
+                                    currentEvent = null;
                                 }
                             }
                         }
