@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { set, get, del } from 'idb-keyval';
+import { Box, Container, Paper, Button, GlobalStyles } from '@mui/material';
 import PageHeader from '../components/default/PageHeader';
 import GuideSection from '../components/input/GuideSection';
 import ResultDisplay from '../components/result/ResultDisplay';
@@ -10,19 +11,44 @@ import UserQuerySummary from '../components/result/UserQuerySummary';
 import ServiceIntroModal from '../components/default/ServiceIntroModal';
 import GhostButton from '../components/ui/GhostButton';
 import LoadingSpinner from '../components/result/LoadingSpinner';
+import ServiceReference from '../components/result/ServiceReference';
+import FeedbackLoopSelector from '../components/result/FeedbackLoopSelector';
+import AskOtherWorkSelector from '../components/result/AskOtherWorkSelector';
+import { useAnalyze } from '../hooks/useAnalyze';
 import InfoIcon from '@mui/icons-material/Info';
+import FavoriteIcon from '@mui/icons-material/Favorite';
 import Footer from '../components/default/Footer';
 
-export default function MainPage() {
-    const [viewState, setViewState] = useState('input'); // 'input', 'loading', 'result'
-    const [inputType, setInputType] = useState('text'); // 'text', 'pdf', 'image'
+const globalStyles = (
+    <GlobalStyles styles={{
+        '@keyframes fadeIn': {
+            from: { opacity: 0, transform: 'translateY(-20px)' },
+            to: { opacity: 1, transform: 'translateY(0)' }
+        },
+        '@keyframes fadeInUp': {
+            from: { opacity: 0, transform: 'translateY(20px)' },
+            to: { opacity: 1, transform: 'translateY(0)' }
+        },
+        '.animate-fade-in': { animation: 'fadeIn 0.8s ease-out' },
+        '.animate-fade-in-up': { animation: 'fadeInUp 0.6s ease-out' }
+    }} />
+);
+
+export default function MainPage({ onError }) {
+    const [viewState, setViewState] = useState('input');
+    const [inputType, setInputType] = useState('text');
+    const [adminSummary, setAdminSummary] = useState('');
     const [textInput, setTextInput] = useState('');
     const [file, setFile] = useState(null);
-    const [output, setOutput] = useState([]);
     const [isIntroModalOpen, setIsIntroModalOpen] = useState(false);
 
-    // Load state from sessionStorage on mount
-    // Load state from sessionStorage and IndexedDB on mount
+    const [firstResponse, setFirstResponse] = useState(null);
+    const [secondResponse, setSecondResponse] = useState(null);
+    const [questionCount, setQuestionCount] = useState(0);
+    const [showReferences, setShowReferences] = useState(false);
+
+    const { fetchAnalyze, fetchRetryAnalyze, reset: resetApi, phase } = useAnalyze();
+
     React.useEffect(() => {
         const savedState = sessionStorage.getItem('appState');
         if (savedState) {
@@ -31,37 +57,41 @@ export default function MainPage() {
                 if (parsedState.viewState) setViewState(parsedState.viewState);
                 if (parsedState.inputType) setInputType(parsedState.inputType);
                 if (parsedState.textInput) setTextInput(parsedState.textInput);
-                if (parsedState.output) setOutput(parsedState.output);
+                if (parsedState.adminSummary) setAdminSummary(parsedState.adminSummary);
+                if (parsedState.firstResponse) setFirstResponse(parsedState.firstResponse);
+                if (parsedState.secondResponse) setSecondResponse(parsedState.secondResponse);
+                if (parsedState.questionCount !== undefined) setQuestionCount(parsedState.questionCount);
+                if (parsedState.showReferences !== undefined) setShowReferences(parsedState.showReferences);
             } catch (e) {
                 console.error("Failed to load state:", e);
                 sessionStorage.removeItem('appState');
             }
         }
 
-        // Load file from IndexedDB
         get('uploadedFile').then((val) => {
             if (val) setFile(val);
         });
     }, []);
 
-    // Save state to sessionStorage and IndexedDB on change
     React.useEffect(() => {
         const _saveState = async () => {
             const stateToSave = {
                 viewState,
                 inputType,
                 textInput,
-                output,
+                adminSummary,
+                firstResponse,
+                secondResponse,
+                questionCount,
+                showReferences,
             };
 
-            // Save metadata to sessionStorage
             try {
                 sessionStorage.setItem('appState', JSON.stringify(stateToSave));
             } catch (e) {
                 console.error("Failed to save session state:", e);
             }
 
-            // Save file to IndexedDB
             if (file) {
                 set('uploadedFile', file).catch(err => console.error("Failed to save file to IDB", err));
             } else {
@@ -69,10 +99,10 @@ export default function MainPage() {
             }
         };
 
-        const timeoutId = setTimeout(_saveState, 500); // Debounce saves
+        const timeoutId = setTimeout(_saveState, 500);
         return () => clearTimeout(timeoutId);
 
-    }, [viewState, inputType, textInput, file, output]);
+    }, [viewState, inputType, textInput, file, adminSummary, firstResponse, secondResponse, questionCount, showReferences]);
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0];
@@ -85,127 +115,206 @@ export default function MainPage() {
         setInputType(mode);
         setTextInput('');
         setFile(null);
-        // We can optionally clear storage here, but the useEffect will update it soon anyway with nulls
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         setViewState('loading');
 
-        // Mock API call simulation - 실제 연동 시 useAnalyze 훅 사용
-        setTimeout(() => {
-            let paragraphs = [];
-            if (inputType === 'text' && textInput) {
-                // 텍스트를 문단별로 분리 (빈 줄 또는 줄바꿈 기준)
-                const rawParagraphs = textInput
-                    .split(/\n\s*\n|\n/)  // 빈 줄 또는 줄바꿈으로 분리
-                    .map(p => p.trim())
-                    .filter(p => p.length > 0);  // 빈 문단 제거
+        try {
+            const response = await fetchAnalyze();
 
-                // 각 문단을 카드로 변환 (topic은 백엔드 API에서 추출 예정)
-                paragraphs = rawParagraphs.map((content, index) => ({
-                    topic: `문단 ${index + 1}의 중심 주제`,  // 백엔드 연동 시 AI가 추출
-                    content: content
-                }));
-
-                // 문단이 없으면 전체 텍스트를 하나의 카드로
-                if (paragraphs.length === 0) {
-                    paragraphs = [{
-                        topic: '입력 내용',
-                        content: textInput
-                    }];
-                }
-            } else if ((inputType === 'pdf' || inputType === 'image') && file) {
-                paragraphs = [
-                    {
-                        topic: '문서 정보',
-                        content: `업로드하신 파일(${file.name})을 성공적으로 분석했습니다.`
-                    },
-                    {
-                        topic: '주요 내용 요약',
-                        content: '문서 내용을 바탕으로 맞춤형 정보를 제공합니다.'
-                    }
-                ];
-            } else {
-                paragraphs = [
-                    {
-                        topic: '알림',
-                        content: '데이터가 입력되지 않았습니다.'
-                    }
-                ];
+            if (response && response.status === 'completed' && response.data) {
+                setFirstResponse({
+                    plain_summary: response.data.plain_summary,
+                    references: response.data.references || []
+                });
+                setAdminSummary(response.data.admin_summary);
+                setQuestionCount(1);
+                setViewState('completed');
             }
-            setOutput(paragraphs);
-            setViewState('result');
-        }, 1500);
+        } catch (err) {
+            console.error('API 호출 오류:', err);
+            const statusCode = err.status || 500;
+            if (onError) {
+                onError(statusCode);
+            }
+        }
+    };
+
+    const handleRetryQuestion = async () => {
+        if (questionCount >= 2) return;
+
+        setViewState('loading');
+
+        try {
+            const response = await fetchRetryAnalyze(adminSummary);
+
+            if (response && response.status === 'completed' && response.data) {
+                setSecondResponse({
+                    plain_summary: response.data.plain_summary
+                });
+                setQuestionCount(2);
+                setViewState('completed');
+            }
+        } catch (err) {
+            console.error('2차 질의 API 호출 오류:', err);
+            const statusCode = err.status || 500;
+            if (onError) {
+                onError(statusCode);
+            }
+        }
     };
 
     const handleRetry = () => {
         setViewState('input');
-        setOutput([]);
+        setAdminSummary('');
         setTextInput('');
         setFile(null);
-        sessionStorage.removeItem('appState'); // Clear stored state on retry
-        del('uploadedFile'); // Clear file from IDB
+        setFirstResponse(null);
+        setSecondResponse(null);
+        setQuestionCount(0);
+        setShowReferences(false);
+        resetApi();
+        sessionStorage.removeItem('appState');
+        del('uploadedFile');
+    };
+
+    const handleGoToWelfareCenter = () => {
+        window.open('https://www.129.go.kr/', '_blank', 'noopener,noreferrer');
+    };
+
+    const handleSatisfied = () => {
+        setShowReferences(true);
     };
 
     return (
-        <div className="main-page-container relative pb-[100px]">
-            {/* 서비스 소개 버튼 (우측 상단 고정, 고스트 버튼 스타일 적용) */}
-            <div className="absolute top-6 right-6 z-10">
-                <GhostButton
-                    label="서비스 소개"
-                    Icon={InfoIcon}
-                    onClick={() => setIsIntroModalOpen(true)}
-                    isLight={true}
-                />
-            </div>
+        <Box sx={{
+            minHeight: '100vh',
+            background: 'linear-gradient(to bottom right, #e0f2fe, #eff6ff, #cffafe)',
+            position: 'relative',
+            overflow: 'hidden',
+            pb: '100px'
+        }}>
+            {globalStyles}
 
-            {/* 서비스 소개 모달 */}
+            {/* Service Intro Button */}
+            <Box sx={{ position: 'fixed', zIndex: 50 }}>
+                {/* Mobile FAB */}
+                <Box sx={{ display: { xs: 'block', sm: 'none' }, position: 'fixed', bottom: 24, right: 24 }}>
+                    <GhostButton
+                        label="서비스 소개"
+                        Icon={InfoIcon}
+                        onClick={() => setIsIntroModalOpen(true)}
+                        isFab={true}
+                    />
+                </Box>
+                {/* Desktop Button */}
+                <Box sx={{ display: { xs: 'none', sm: 'block' }, position: 'fixed', top: 24, right: 24 }}>
+                    <Button
+                        onClick={() => setIsIntroModalOpen(true)}
+                        sx={{
+                            bgcolor: 'rgba(255,255,255,0.7)',
+                            backdropFilter: 'blur(8px)',
+                            color: '#1d4ed8',
+                            px: 3,
+                            py: 1,
+                            borderRadius: '50px',
+                            boxShadow: 2,
+                            textTransform: 'none',
+                            fontWeight: 600,
+                            '&:hover': {
+                                bgcolor: 'rgba(255,255,255,0.9)',
+                            }
+                        }}
+                        startIcon={<FavoriteIcon sx={{ color: '#3b82f6' }} />}
+                    >
+                        서비스 소개
+                    </Button>
+                </Box>
+            </Box>
+
             <ServiceIntroModal
                 isOpen={isIntroModalOpen}
                 onClose={() => setIsIntroModalOpen(false)}
             />
 
-            <div className="w-full max-w-lg">
-                <div className="unified-card">
-                    {/* 타이틀 (항상 표시) */}
+            <Container maxWidth="sm" sx={{ position: 'relative', zIndex: 10, pt: 4, px: 2 }}>
+                {/* Main Card */}
+                <Paper
+                    elevation={0}
+                    sx={{
+                        borderRadius: '24px',
+                        p: { xs: 3, sm: 4 },
+                        bgcolor: 'rgba(255,255,255,0.9)',
+                        backdropFilter: 'blur(12px)',
+                        border: '2px solid #bfdbfe',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+                        position: 'relative',
+                        overflow: 'visible',
+                        transition: 'all 0.7s',
+                    }}
+                    className="animate-fade-in"
+                >
                     <PageHeader />
 
-                    {/* 입력 모드 */}
                     {viewState === 'input' && (
                         <>
                             <GuideSection />
                             <InputModeSelector currentMode={inputType} onModeChange={handleModeChange} />
-                            <div className="input-area-fixed mb-4">
+
+                            <Box sx={{ minHeight: 200, mb: 3 }}>
                                 {inputType === 'text' && (
                                     <TextInput value={textInput} onChange={setTextInput} />
                                 )}
-                                {/*pdf 파일 사용 시 주석 해제
-                                    {inputType === 'pdf' && (
-                                    <PdfUploader file={file} onFileChange={handleFileChange} />
-                                )}*/}
                                 {inputType === 'image' && (
                                     <ImageUploader file={file} onFileChange={handleFileChange} />
                                 )}
-                            </div>
-                            <button
+                            </Box>
+                            <Button
+                                fullWidth
+                                variant="contained"
                                 onClick={handleSubmit}
                                 disabled={
                                     (inputType === 'text' && !textInput.trim()) ||
                                     ((inputType === 'pdf' || inputType === 'image') && !file)
                                 }
-                                className={`action-button ${(inputType === 'text' && !textInput.trim()) ||
-                                    ((inputType === 'pdf' || inputType === 'image') && !file)
-                                    ? 'action-button-disabled'
-                                    : 'action-button-primary'
-                                    }`}
+                                sx={{
+                                    py: 2.5,
+                                    borderRadius: '16px',
+                                    fontWeight: 700,
+                                    fontSize: '1.1rem',
+                                    textTransform: 'none',
+                                    background: 'linear-gradient(to right, #3b82f6, #0ea5e9, #06b6d4)',
+                                    boxShadow: '0 10px 30px -5px rgba(59, 130, 246, 0.4)',
+                                    position: 'relative',
+                                    overflow: 'hidden',
+                                    '&:hover': {
+                                        boxShadow: '0 20px 40px -5px rgba(59, 130, 246, 0.5)',
+                                    },
+                                    '&.Mui-disabled': {
+                                        background: '#e5e7eb',
+                                        color: '#9ca3af',
+                                        boxShadow: 'none'
+                                    },
+                                    '&::after': {
+                                        content: '""',
+                                        position: 'absolute',
+                                        inset: 0,
+                                        background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.3), transparent)',
+                                        transform: 'translateX(-100%)',
+                                        transition: 'transform 1s'
+                                    },
+                                    '&:hover::after': {
+                                        transform: 'translateX(100%)'
+                                    }
+                                }}
                             >
                                 제출하기
-                            </button>
+                            </Button>
                         </>
                     )}
 
-                    {/* 로딩 및 결과 모드 (요약 항상 표시) */}
-                    {(viewState === 'loading' || viewState === 'result') && (
+                    {(viewState === 'loading' || viewState === 'completed') && (
                         <>
                             <UserQuerySummary
                                 type={inputType}
@@ -213,33 +322,66 @@ export default function MainPage() {
                                 file={file}
                             />
 
-                            {/* 로딩 중일 때 스피너 표시 */}
                             {viewState === 'loading' && (
-                                <LoadingSpinner />
-                            )}
-
-                            {/* 결과 나왔을 때 버튼 표시 */}
-                            {viewState === 'result' && (
-                                <button
-                                    onClick={handleRetry}
-                                    className="action-button mode-button-inactive"
-                                >
-                                    다시 질문하기
-                                </button>
+                                <LoadingSpinner phase={phase} />
                             )}
                         </>
                     )}
-                </div>
+                </Paper>
 
-                {/* 결과 섹션 - 카드 외부 하단에 배치 */}
-                {viewState === 'result' && (
-                    <div className="mt-6 animate-fade-in-up">
-                        <ResultDisplay paragraphs={output} />
-                    </div>
+                {/* Results Section */}
+                {viewState === 'completed' && (
+                    <Box sx={{ mt: 4 }} className="animate-fade-in-up">
+                        {firstResponse && (
+                            <ResultDisplay
+                                result={firstResponse.plain_summary}
+                                references={firstResponse.references}
+                                label="1차 답변"
+                                isFirst={true}
+                            />
+                        )}
+
+                        {secondResponse && (
+                            <Box sx={{ mt: 3 }}>
+                                <ResultDisplay
+                                    result={secondResponse.plain_summary}
+                                    references={secondResponse.references}
+                                    label="2차 답변"
+                                    isFirst={false}
+                                />
+                            </Box>
+                        )}
+                    </Box>
                 )}
-            </div>
+
+                {/* Feedback Section */}
+                {viewState === 'completed' && questionCount < 2 && !showReferences && (
+                    <Box sx={{ mt: 4 }} className="animate-fade-in-up">
+                        <FeedbackLoopSelector
+                            onYes={handleSatisfied}
+                            onNo={handleRetryQuestion}
+                        />
+                    </Box>
+                )}
+
+                {/* References & Retry Section */}
+                {viewState === 'completed' && (showReferences || questionCount >= 2) && (
+                    <>
+                        <ServiceReference
+                            references={firstResponse?.references || []}
+                        />
+                        <Box sx={{ mt: 2 }} className="animate-fade-in-up">
+                            <AskOtherWorkSelector
+                                onRetry={handleRetry}
+                                onOtherWork={handleGoToWelfareCenter}
+                            />
+                        </Box>
+                    </>
+                )}
+
+            </Container>
 
             <Footer />
-        </div>
+        </Box>
     );
 }

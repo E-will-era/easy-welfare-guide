@@ -1,41 +1,51 @@
-import React from 'react';
+import React, { useState } from 'react';
+import ReactMarkdown from "react-markdown";
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
-/**
- * 문단별 중심주제 결과 표시 컴포넌트
- * @param {Object} props
- * @param {Array} props.paragraphs - 문단별 데이터 배열 [{ topic: string, content: string }]
- */
-export default function ResultDisplay({ paragraphs }) {
-    if (!paragraphs || paragraphs.length === 0) return null;
+export default function ResultDisplay({ result, references = [], label = "답변", isFirst = true }) {
+    const [copied, setCopied] = useState(false);
 
-    // 동그라미 숫자 변환
-    const circleNumbers = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+    if (!result) return null;
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(result);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('복사 실패:', err);
+        }
+    };
 
     return (
-        <div className="space-y-4">
-            {paragraphs.map((paragraph, index) => (
-                <div
-                    key={index}
-                    className="bg-white rounded-lg shadow-md border-2 border-blue-400 overflow-hidden"
-                >
-                    {/* 헤더 - 중심 내용 */}
-                    <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-200">
-                        <span className="text-blue-500 font-bold text-lg">
-                            {circleNumbers[index] || index + 1}
-                        </span>
-                        <span className="text-blue-600 font-bold">중심 내용_</span>
-                        <span className="text-gray-800 font-semibold">
-                            {paragraph.topic}
-                        </span>
-                    </div>
-                    {/* 본문 내용 */}
-                    <div className="px-4 py-3">
-                        <p className="text-gray-700 text-sm leading-relaxed">
-                            {paragraph.content}
-                        </p>
-                    </div>
-                </div>
-            ))}
+        <div className={`bg-white rounded-lg shadow-md p-6 ${!isFirst ? 'border-l-4 border-blue-500' : ''}`}>
+            <div className="flex items-center gap-2 mb-4">
+                <span className={`px-2 py-1 text-xs font-medium rounded ${
+                    isFirst ? 'bg-gray-100 text-gray-700' : 'bg-blue-100 text-blue-700'
+                }`}>
+                    {label}
+                </span>
+                <h2 className="text-xl font-semibold text-gray-800">
+                    출력 결과
+                </h2>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <ReactMarkdown>
+                    {result}
+                </ReactMarkdown>
+            </div>
+            <button
+                onClick={handleCopy}
+                className={`w-full py-2 rounded-lg font-medium mt-3 transition-colors flex items-center justify-center gap-2 text-sm ${
+                    copied
+                        ? 'bg-gray-400 text-white cursor-default'
+                        : 'bg-[#1C8BE7] text-white hover:bg-[#1a7ed4]'
+                }`}
+                disabled={copied}
+            >
+                <ContentCopyIcon sx={{ fontSize: 16 }} />
+                {copied ? '복사 완료' : '복사'}
+            </button>
         </div>
     );
 }
