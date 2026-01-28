@@ -47,7 +47,7 @@ export default function MainPage({ onError }) {
     const [questionCount, setQuestionCount] = useState(0);
     const [showReferences, setShowReferences] = useState(false);
 
-    const { fetchAnalyze, fetchRetryAnalyze, reset: resetApi, phase } = useAnalyze();
+    const { fetchAnalyze, reset: resetApi, phase } = useAnalyze();
 
     React.useEffect(() => {
         const savedState = sessionStorage.getItem('appState');
@@ -118,17 +118,22 @@ export default function MainPage({ onError }) {
     };
 
     const handleSubmit = async () => {
+        if (!file) {
+            console.error('파일이 선택되지 않았습니다.');
+            return;
+        }
+
         setViewState('loading');
 
         try {
-            const response = await fetchAnalyze();
+            const response = await fetchAnalyze(file);
 
-            if (response && response.status === 'completed' && response.data) {
+            if (response) {
                 setFirstResponse({
-                    plain_summary: response.data.plain_summary,
-                    references: response.data.references || []
+                    plain_summary: response.plain_summary || response.result?.plain_summary,
+                    references: response.references || response.result?.references || []
                 });
-                setAdminSummary(response.data.admin_summary);
+                setAdminSummary(response.admin_summary || response.result?.admin_summary || '');
                 setQuestionCount(1);
                 setViewState('completed');
             }
@@ -141,28 +146,9 @@ export default function MainPage({ onError }) {
         }
     };
 
-    const handleRetryQuestion = async () => {
-        if (questionCount >= 2) return;
-
-        setViewState('loading');
-
-        try {
-            const response = await fetchRetryAnalyze(adminSummary);
-
-            if (response && response.status === 'completed' && response.data) {
-                setSecondResponse({
-                    plain_summary: response.data.plain_summary
-                });
-                setQuestionCount(2);
-                setViewState('completed');
-            }
-        } catch (err) {
-            console.error('2차 질의 API 호출 오류:', err);
-            const statusCode = err.status || 500;
-            if (onError) {
-                onError(statusCode);
-            }
-        }
+    const handleRetryQuestion = () => {
+        // 2차 질의 기능은 현재 미지원 - 바로 참고자료 표시
+        setShowReferences(true);
     };
 
     const handleRetry = () => {
@@ -198,9 +184,9 @@ export default function MainPage({ onError }) {
             {globalStyles}
 
             {/* Service Intro Button */}
-            <Box sx={{ position: 'fixed', zIndex: 50 }}>
-                {/* Mobile FAB */}
-                <Box sx={{ display: { xs: 'block', sm: 'none' }, position: 'fixed', bottom: 24, right: 24 }}>
+            <Box sx={{ position: 'fixed', zIndex: 100 }}>
+                {/* Mobile FAB - Footer 위에 위치 */}
+                <Box sx={{ display: { xs: 'block', sm: 'none' }, position: 'fixed', bottom: 60, right: 16 }}>
                     <GhostButton
                         label="서비스 소개"
                         Icon={InfoIcon}

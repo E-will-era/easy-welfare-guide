@@ -155,25 +155,3 @@
 .ghost-button-fab:active {
     transform: scale(0.95);
 }
-
-/* 서비스 소개 버튼 위치 */
-.service-intro-btn-container {
-    position: fixed;
-    z-index: 50;
-}
-
-/* 모바일: footer 바로 위 */
-@media (max-width: 639px) {
-    .service-intro-btn-container {
-        bottom: 80px;
-        right: 12px;
-    }
-}
-
-/* 데스크탑: 상단 우측 */
-@media (min-width: 640px) {
-    .service-intro-btn-container {
-        top: 24px;
-        right: 24px;
-    }
-}

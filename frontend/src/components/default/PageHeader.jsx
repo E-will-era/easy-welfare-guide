@@ -7,7 +7,7 @@ export default function PageHeader() {
             <img
                 src={mainLogo}
                 alt="이음:새 로고"
-                className="w-72 sm:w-96 mx-auto"
+                className="w-32 sm:w-48 mx-auto"
             />
         </div>
     );

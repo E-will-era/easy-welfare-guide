@@ -4,17 +4,21 @@ import Box from '@mui/material/Box';
 import animationSprite from '../../assets/images/animation.png';
 
 const PHASE_MESSAGES = {
+    relevance: '복지 문서인지 확인하고 있어요...',
     search: '관련 정보를 검색하고 있어요...',
     summarize: '문서를 요약하고 있어요...',
     translate: '쉬운 말로 바꾸고 있어요...',
     validate: '내용을 검증하고 있어요...',
+    completed: '분석이 완료되었어요!',
 };
 
 const PHASE_PROGRESS = {
-    search: 25,
+    relevance: 15,
+    search: 30,
     summarize: 50,
-    translate: 75,
+    translate: 70,
     validate: 90,
+    completed: 100,
 };
 
 export default function LoadingSpinner({ phase }) {
