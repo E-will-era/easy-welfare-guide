@@ -31,7 +31,7 @@ cp .env.example .env
 
 ```bash
 # FastAPI 서버
-uvicorn bakend:app --reload --port 8000
+uvicorn backend:app --reload --port 8000
 
 ```
 
