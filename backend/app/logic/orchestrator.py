@@ -292,3 +292,75 @@ JSON 형식으로 응답하세요:
             temperature=0.0
         )
         return json.loads(response.choices[0].message.content)
+
+    async def stream_retry_flow(self, admin_summary: str) -> AsyncGenerator[str, None]:
+        """
+        [SSE] 재요청(Retry) 흐름: Admin Summary를 받아 더 쉬운 표현(Level 7)으로 변환
+        """
+        task_id = uuid.uuid4().hex
+        start_time = time.perf_counter()
+
+        try:
+            # 1. 난이도 재조정 알림
+            yield self._format_sse("progress", {
+                "status": "pending",
+                "data": {
+                    "phase": "analyze_difficulty",
+                    "message": "더 쉬운 표현(유치원/비유)으로 난이도를 조정합니다."
+                }
+            })
+            
+            # 2. Level 7(유치원) 수준으로 재순화 수행
+            step_start = time.perf_counter()
+            
+            # llm_handler의 refine 메서드 호출 (level=7 적용)
+            # refiner.yaml의 level_7 규칙("추상적인 개념을 '비유'로 치환")을 따름
+            retry_plain_summary = await self.llm_handler.refine(admin_summary, level=7)
+            
+            logger.info(f"[Retry] Re-refining to Level 7: {time.perf_counter() - step_start:.2f}s")
+            
+            yield self._format_sse("progress", {
+                "status": "processing",
+                "data": {
+                    "phase": "re_translate",
+                    "message": "이해하기 쉽도록 비유를 사용하여 설명을 고치고 있습니다."
+                }
+            })
+
+            # 3. 안전성 검증 (Original Admin Summary vs New Easy Summary)
+            step_start = time.perf_counter()
+            validation_result = await self._validate_summaries(admin_summary, retry_plain_summary)
+            
+            logger.info(f"[Retry] Validation: {time.perf_counter() - step_start:.2f}s")
+            
+            if not validation_result['passed']:
+                logger.warning(f"[Retry] Validation Warning: {validation_result.get('reason')}")
+
+            yield self._format_sse("progress", {
+                "status": "processing",
+                "data": {
+                    "phase": "validate",
+                    "message": "내용의 정확성을 검증하고 있습니다."
+                }
+            })
+
+            # 4. 최종 결과 전송
+            final_data = {
+                "task_id": task_id,
+                "admin_summary": admin_summary, # 비교를 위해 원본 포함
+                "retry_plain_summary": retry_plain_summary,     # 프론트엔드 키 통일을 위해 plain_summary로 전달하거나 retry_plain_summary 구분 가능
+                "validation": validation_result
+            }
+            
+            logger.info(f"✅ Retry Process Completed: {time.perf_counter() - start_time:.2f}s")
+            yield self._format_sse("completed", final_data)
+
+        except Exception as e:
+            logger.error(f"Retry Streaming Error: {str(e)}")
+            yield self._format_sse("error", {
+                "status": "failed",
+                "data": {
+                    "phase": "error",
+                    "message": f"재요청 처리 중 오류가 발생했습니다: {str(e)}"
+                }
+            })
