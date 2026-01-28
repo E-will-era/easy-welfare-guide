@@ -198,9 +198,9 @@ export default function MainPage({ onError }) {
             {globalStyles}
 
             {/* Service Intro Button */}
-            <Box sx={{ position: 'fixed', zIndex: 50 }}>
-                {/* Mobile FAB */}
-                <Box sx={{ display: { xs: 'block', sm: 'none' }, position: 'fixed', bottom: 24, right: 24 }}>
+            <Box sx={{ position: 'fixed', zIndex: 100 }}>
+                {/* Mobile FAB - Footer 위에 위치 */}
+                <Box sx={{ display: { xs: 'block', sm: 'none' }, position: 'fixed', bottom: 60, right: 16 }}>
                     <GhostButton
                         label="서비스 소개"
                         Icon={InfoIcon}
