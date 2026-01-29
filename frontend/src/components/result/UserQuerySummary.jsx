@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import TextSnippetIcon from '@mui/icons-material/TextSnippet';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import CloseIcon from '@mui/icons-material/Close';
 
@@ -35,14 +34,12 @@ export default function UserQuerySummary({ type, text, file }) {
                     <span className="text-xs font-normal text-gray-400">
                         {type === 'text' && (isExpanded ? '접기' : '더 보기')}
                         {type === 'image' && '클릭하여 확대'}
-                        {type === 'pdf' && '클릭하여 다운로드'}
                     </span>
                 </h2>
 
                 <div className="flex items-start">
                     <div className="mr-3 mt-1 text-blue-600">
                         {type === 'text' && <TextSnippetIcon />}
-                        {type === 'pdf' && <PictureAsPdfIcon />}
                         {type === 'image' && <CameraAltIcon />}
                     </div>
 

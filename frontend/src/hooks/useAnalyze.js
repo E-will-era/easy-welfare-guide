@@ -17,6 +17,7 @@ export function useAnalyze() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [phase, setPhase] = useState(null); // 현재 진행 단계
+    const [errorMessage, setErrorMessage] = useState(null); // close/failed 시 백엔드에서 전달된 메시지
 
     const abortControllerRef = useRef(null);
 
@@ -34,6 +35,7 @@ export function useAnalyze() {
         setError(null);
         setPhase(null);
         setData(null);
+        setErrorMessage(null);
 
         // 이전 요청 취소
         if (abortControllerRef.current) {
@@ -59,6 +61,7 @@ export function useAnalyze() {
             const decoder = new TextDecoder();
             let buffer = '';
             let finalData = null;
+            let isClosedOrFailed = false; // close/failed phase 여부 추적
 
             return new Promise((resolve, reject) => {
                 const processStream = async () => {
@@ -69,6 +72,12 @@ export function useAnalyze() {
                             const { done, value } = await reader.read();
 
                             if (done) {
+                                // close/failed 상태면 로딩 유지하고 resolve하지 않음 (에러 UI 계속 표시)
+                                if (isClosedOrFailed) {
+                                    setLoading(false);
+                                    resolve(null);
+                                    break;
+                                }
                                 setPhase('completed');
                                 setLoading(false);
                                 resolve(finalData);
@@ -93,7 +102,17 @@ export function useAnalyze() {
 
                                         // progress 이벤트: phase 업데이트
                                         if (currentEvent === 'progress' && jsonData.data?.phase) {
-                                            setPhase(jsonData.data.phase);
+                                            const currentPhase = jsonData.data.phase;
+                                            setPhase(currentPhase);
+
+                                            // close/failed phase 처리: 에러 메시지와 함께 표시
+                                            if (currentPhase === 'close' || currentPhase === 'failed') {
+                                                isClosedOrFailed = true;
+                                                if (jsonData.data?.message) {
+                                                    setErrorMessage(jsonData.data.message);
+                                                }
+                                                // 로딩은 유지하되 스트림은 계속 처리
+                                            }
                                         }
 
                                         // completed 이벤트: 최종 데이터 저장
@@ -105,11 +124,22 @@ export function useAnalyze() {
 
                                         // error 이벤트: 에러 처리
                                         if (currentEvent === 'error') {
+                                            const errorPhase = jsonData.data?.phase;
                                             const errorMsg = jsonData.data?.message || '처리 중 오류가 발생했습니다.';
-                                            setError(errorMsg);
-                                            setLoading(false);
-                                            reject(new Error(errorMsg));
-                                            return;
+
+                                            // close/failed phase면 에러 UI로 표시 (에러 페이지로 가지 않음)
+                                            if (errorPhase === 'close' || errorPhase === 'failed') {
+                                                isClosedOrFailed = true;
+                                                setPhase(errorPhase);
+                                                setErrorMessage(errorMsg);
+                                                // 스트림 종료 대기
+                                            } else {
+                                                // 그 외 에러는 기존대로 처리
+                                                setError(errorMsg);
+                                                setLoading(false);
+                                                reject(new Error(errorMsg));
+                                                return;
+                                            }
                                         }
                                     } catch (parseErr) {
                                         // JSON 파싱 실패 시 무시
@@ -152,6 +182,7 @@ export function useAnalyze() {
         setLoading(false);
         setError(null);
         setPhase(null);
+        setErrorMessage(null);
     }, []);
 
     return {
@@ -159,6 +190,7 @@ export function useAnalyze() {
         loading,
         error,
         phase,
+        errorMessage,
         fetchAnalyze,
         reset,
     };

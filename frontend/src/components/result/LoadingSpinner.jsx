@@ -1,7 +1,9 @@
 import React from 'react';
 import LinearProgress from '@mui/material/LinearProgress';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import animationSprite from '../../assets/images/animation.png';
+import apiErrorImage from '../../assets/images/apiError.png';
 
 const PHASE_MESSAGES = {
     relevance: '복지 문서인지 확인하고 있어요...',
@@ -21,9 +23,47 @@ const PHASE_PROGRESS = {
     completed: 100,
 };
 
-export default function LoadingSpinner({ phase }) {
-    const message = phase ? PHASE_MESSAGES[phase] : '분석 준비 중...';
+export default function LoadingSpinner({ phase, errorMessage, onRetry }) {
+    const isError = phase === 'close' || phase === 'failed';
+    const message = isError
+        ? (errorMessage || '오류가 발생했습니다.')
+        : (phase ? PHASE_MESSAGES[phase] : '분석 준비 중...');
     const progress = phase ? PHASE_PROGRESS[phase] : 10;
+
+    // 에러 상태일 때 에러 UI 표시
+    if (isError) {
+        return (
+            <div className="flex flex-col items-center justify-center py-12">
+                <img
+                    src={apiErrorImage}
+                    alt="API Error"
+                    className="w-40 h-40 mb-4 object-contain"
+                />
+                <p className="text-gray-600 font-medium text-center px-4">{message}</p>
+                {onRetry && (
+                    <Button
+                        variant="contained"
+                        onClick={onRetry}
+                        sx={{
+                            mt: 3,
+                            py: 1.5,
+                            px: 4,
+                            borderRadius: '12px',
+                            fontWeight: 600,
+                            textTransform: 'none',
+                            background: 'linear-gradient(to right, #3b82f6, #0ea5e9)',
+                            boxShadow: '0 4px 14px rgba(59, 130, 246, 0.3)',
+                            '&:hover': {
+                                boxShadow: '0 6px 20px rgba(59, 130, 246, 0.4)',
+                            },
+                        }}
+                    >
+                        다른 질문하기
+                    </Button>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col items-center justify-center py-12">

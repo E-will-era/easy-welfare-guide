@@ -47,7 +47,7 @@ export default function MainPage({ onError }) {
     const [questionCount, setQuestionCount] = useState(0);
     const [showReferences, setShowReferences] = useState(false);
 
-    const { fetchAnalyze, reset: resetApi, phase } = useAnalyze();
+    const { fetchAnalyze, reset: resetApi, phase, errorMessage } = useAnalyze();
 
     React.useEffect(() => {
         const savedState = sessionStorage.getItem('appState');
@@ -137,8 +137,13 @@ export default function MainPage({ onError }) {
                 setQuestionCount(1);
                 setViewState('completed');
             }
+            // response가 null이면 (close/failed phase) viewState는 loading 유지 → 에러 UI 표시
         } catch (err) {
             console.error('API 호출 오류:', err);
+            // phase가 close/failed면 에러 페이지로 가지 않고 로딩 화면에서 에러 UI 표시
+            if (phase === 'close' || phase === 'failed') {
+                return; // viewState는 loading 유지
+            }
             const statusCode = err.status || 500;
             if (onError) {
                 onError(statusCode);
@@ -309,7 +314,7 @@ export default function MainPage({ onError }) {
                             />
 
                             {viewState === 'loading' && (
-                                <LoadingSpinner phase={phase} />
+                                <LoadingSpinner phase={phase} errorMessage={errorMessage} onRetry={handleRetry} />
                             )}
                         </>
                     )}

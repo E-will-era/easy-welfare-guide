@@ -63,24 +63,24 @@ export default function ServiceIntroModal({ isOpen, onClose }) {
                                     "복잡한 공공문서를 가볍게,<br />설명은 쉽고 가깝게"
                                 </h2>
                                 <p className="text-gray-500 text-sm italic bg-gray-50 py-3 px-4 rounded-lg inline-block">
-                                    사회초년생 A씨의 막막했던 마음을<br />떠올리며 꼼꼼하게 만들었습니다.
+                                    암호 같은 용어 앞에서 포기하려 했던<br />사회초년생 A씨의 막막했던 마음을 떠올리며 만들었습니다.
                                 </p>
                             </div>
 
                             <div className="grid grid-cols-1 gap-4">
                                 <FeatureBox
                                     title="OCR (이미지 인식)"
-                                    desc="종이 문서를 찍기만 하세요. 텍스트로 변환해 분석합니다."
+                                    desc="텍스트를 직접 입력하지 않아도, 이미지 속 글자를 인식해 내용을 가져와요."
                                     color="blue"
                                 />
                                 <FeatureBox
                                     title="눈높이 설명"
-                                    desc="어려운 행정 용어를 쉬운 말로 풀어서 설명해드립니다."
+                                    desc="어려운 행정 용어를 2단계의 수준으로 나눠 쉽게 풀어드려요."
                                     color="green"
                                 />
                                 <FeatureBox
                                     title="RAG (근거 기반 요약)"
-                                    desc="문서의 내용을 정확하게 근거하여 핵심만 요약합니다."
+                                    desc="공공기관 공고 자료를 바탕으로 핵심을 뽑고, 생성형 AI 기술로 보기 쉽게 요약해요."
                                     color="purple"
                                 />
                             </div>
