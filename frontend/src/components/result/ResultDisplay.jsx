@@ -38,7 +38,7 @@ export default function ResultDisplay({ result, references = [], label = "답변
                 onClick={() => setShowDisclaimer(!showDisclaimer)}
             >
                 <div className="flex items-center justify-between text-blue-700">
-                    <span>AI 요약본입니다. 정확한 내용은 질문과 링크를 확인하세요.</span>
+                    <span>AI 요약본입니다. 정확한 내용은 원문 공고에서 확인하세요.</span>
                     <span className={`transform transition-transform ${showDisclaimer ? 'rotate-180' : ''}`}>
                         ▼
                     </span>
