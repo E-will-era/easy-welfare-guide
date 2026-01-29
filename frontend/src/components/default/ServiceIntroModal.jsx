@@ -113,6 +113,19 @@ export default function ServiceIntroModal({ isOpen, onClose }) {
                                     </div>
                                 </div>
                             </div>
+                        <div className="mt-6 pt-6 border-t border-gray-200">
+                        <p className="text-center text-gray-500 text-xs">
+                            문의하실 것이 있으신가요?
+                        </p>
+                        <p className="text-center mt-2">
+                            <a 
+                                href="https://forms.gle/8VAbzj9QdYsohzdy9"
+                                className="text-blue-600 hover:underline font-semibold text-xs"
+                            >
+                                문의하기
+                            </a>
+                        </p>
+                    </div>
                         </div>
                     )}
                 </div>

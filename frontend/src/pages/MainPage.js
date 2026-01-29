@@ -11,6 +11,7 @@ import UserQuerySummary from '../components/result/UserQuerySummary';
 import ServiceIntroModal from '../components/default/ServiceIntroModal';
 import GhostButton from '../components/ui/GhostButton';
 import LoadingSpinner from '../components/result/LoadingSpinner';
+import SecondLoadingSpinner from '../components/result/SecondLoadingSpinner';
 import ServiceReference from '../components/result/ServiceReference';
 import FeedbackLoopSelector from '../components/result/FeedbackLoopSelector';
 import AskOtherWorkSelector from '../components/result/AskOtherWorkSelector';
@@ -46,8 +47,11 @@ export default function MainPage({ onError }) {
     const [secondResponse, setSecondResponse] = useState(null);
     const [questionCount, setQuestionCount] = useState(0);
     const [showReferences, setShowReferences] = useState(false);
+    const [retryLoading, setRetryLoading] = useState(false); // 2차 질의 로딩 상태
+    const [retryError, setRetryError] = useState(false); // 2차 질의 에러 상태
+    const [retryErrorMessage, setRetryErrorMessage] = useState(null); // 2차 질의 에러 메시지
 
-    const { fetchAnalyze, reset: resetApi, phase, errorMessage } = useAnalyze();
+    const { fetchAnalyze, fetchRetry, reset: resetApi, phase, errorMessage } = useAnalyze();
 
     React.useEffect(() => {
         const savedState = sessionStorage.getItem('appState');
@@ -151,9 +155,39 @@ export default function MainPage({ onError }) {
         }
     };
 
-    const handleRetryQuestion = () => {
-        // 2차 질의 기능은 현재 미지원 - 바로 참고자료 표시
-        setShowReferences(true);
+    const handleRetryQuestion = async () => {
+        if (!adminSummary) {
+            console.error('admin_summary가 없습니다.');
+            setShowReferences(true);
+            return;
+        }
+
+        // 2차 질의 시작 - viewState는 completed 유지, retryLoading만 true
+        setRetryLoading(true);
+        setRetryError(false);
+
+        try {
+            const response = await fetchRetry(adminSummary);
+
+            if (response) {
+                setSecondResponse({
+                    plain_summary: response.retry_plain_summary || response.plain_summary,
+                    references: firstResponse?.references || []
+                });
+                setQuestionCount(2);
+                setRetryLoading(false);
+            } else {
+                // response가 null이면 (close/failed/error phase) 에러 상태로 전환
+                setRetryLoading(false);
+                setRetryError(true);
+                setShowReferences(true); // 에러 시 참고자료 표시
+            }
+        } catch (err) {
+            console.error('2차 질의 오류:', err);
+            setRetryLoading(false);
+            setRetryError(true);
+            setShowReferences(true); // 에러 시 참고자료 표시
+        }
     };
 
     const handleRetry = () => {
@@ -165,6 +199,8 @@ export default function MainPage({ onError }) {
         setSecondResponse(null);
         setQuestionCount(0);
         setShowReferences(false);
+        setRetryLoading(false);
+        setRetryError(false);
         resetApi();
         sessionStorage.removeItem('appState');
         del('uploadedFile');
@@ -332,7 +368,22 @@ export default function MainPage({ onError }) {
                             />
                         )}
 
-                        {secondResponse && (
+                        {/* 2차 질의 로딩 중 */}
+                        {retryLoading && (
+                            <Box sx={{ mt: 3 }}>
+                                <SecondLoadingSpinner phase={phase} errorMessage={errorMessage} />
+                            </Box>
+                        )}
+
+                        {/* 2차 질의 에러 시 */}
+                        {retryError && !retryLoading && (
+                            <Box sx={{ mt: 3 }}>
+                                <SecondLoadingSpinner phase="error" errorMessage={retryErrorMessage} />
+                            </Box>
+                        )}
+
+                        {/* 2차 답변 표시 */}
+                        {secondResponse && !retryLoading && !retryError && (
                             <Box sx={{ mt: 3 }}>
                                 <ResultDisplay
                                     result={secondResponse.plain_summary}
@@ -345,8 +396,8 @@ export default function MainPage({ onError }) {
                     </Box>
                 )}
 
-                {/* Feedback Section */}
-                {viewState === 'completed' && questionCount < 2 && !showReferences && (
+                {/* Feedback Section - 2차 질의 로딩 중이 아니고, 에러도 아닐 때만 표시 */}
+                {viewState === 'completed' && questionCount < 2 && !showReferences && !retryLoading && !retryError && (
                     <Box sx={{ mt: 4 }} className="animate-fade-in-up">
                         <FeedbackLoopSelector
                             onYes={handleSatisfied}
@@ -355,8 +406,8 @@ export default function MainPage({ onError }) {
                     </Box>
                 )}
 
-                {/* References & Retry Section */}
-                {viewState === 'completed' && (showReferences || questionCount >= 2) && (
+                {/* References & Retry Section - 2차 완료, showReferences, 또는 2차 에러 시 표시 */}
+                {viewState === 'completed' && (showReferences || questionCount >= 2 || retryError) && !retryLoading && (
                     <>
                         <ServiceReference
                             references={firstResponse?.references || []}

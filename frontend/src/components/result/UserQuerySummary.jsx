@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import TextSnippetIcon from '@mui/icons-material/TextSnippet';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import CloseIcon from '@mui/icons-material/Close';
@@ -79,9 +80,13 @@ export default function UserQuerySummary({ type, text, file }) {
                 </div>
             </div>
 
-            {/* 이미지 확대 모달 */}
-            {showImageModal && objectUrl && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-90 p-4" onClick={() => setShowImageModal(false)}>
+            {/* 이미지 확대 모달 - Portal을 사용하여 body에 직접 렌더링 */}
+            {showImageModal && objectUrl && createPortal(
+                <div
+                    className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-90 p-4"
+                    style={{ zIndex: 9999 }}
+                    onClick={() => setShowImageModal(false)}
+                >
                     <div className="relative max-w-full max-h-full">
                         <button
                             onClick={() => setShowImageModal(false)}
@@ -96,7 +101,8 @@ export default function UserQuerySummary({ type, text, file }) {
                             onClick={(e) => e.stopPropagation()} // 이미지 클릭 시 모달 닫기 방지
                         />
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </>
     );

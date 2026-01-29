@@ -1,40 +1,42 @@
 import os
-import yaml
-import aiofiles
 from pathlib import Path
 from typing import Dict, Optional
 from app.core.logger import logger
 
+"""
+파일명: human.py
+설명: TXT 프롬프트 파일 로더 (기존 human.py를 TXT 방식으로 전환)
+"""
+
 class PromptLoader:
     """
-    YAML 프롬프트 파일 로더
-    - Summarizer, Refiner, Validator의 YAML 가이드라인 로드
+    TXT 프롬프트 파일 로더
+    - Summarizer, Refiner, Validator의 TXT 프롬프트 로드
     - 캐싱으로 성능 최적화
     """
     
     def __init__(self):
         # prompts 폴더 경로 설정
-        backend_dir = Path(__file__).parent.parent
+        backend_dir = Path(__file__).parent
         self.prompts_dir = backend_dir / "prompts"
         
         # 캐시 저장소
-        self._cache: Dict[str, dict] = {}
+        self._cache: Dict[str, str] = {}
         
         logger.info(f"PromptLoader initialized. Prompts directory: {self.prompts_dir}")
     
-    async def load(self, filename: str) -> dict:
+    async def load(self, filename: str) -> str:
         """
-        YAML 프롬프트 파일 비동기 로드
+        TXT 프롬프트 파일 비동기 로드
         
         Args:
-            filename: YAML 파일명 (예: 'summarizer.yaml', 'refiner.yaml')
+            filename: TXT 파일명 (예: 'summarizer_prompt.txt', 'refiner_prompt.txt')
             
         Returns:
-            YAML 내용을 딕셔너리로 반환
+            프롬프트 텍스트 문자열
             
         Raises:
             FileNotFoundError: 파일이 없을 때
-            yaml.YAMLError: YAML 파싱 오류
         """
         # 캐시 확인
         if filename in self._cache:
@@ -50,35 +52,30 @@ class PromptLoader:
             raise FileNotFoundError(error_msg)
         
         try:
-            # 비동기 파일 읽기
-            async with aiofiles.open(file_path, mode='r', encoding='utf-8') as f:
-                content = await f.read()
-                data = yaml.safe_load(content)
+            # 동기 파일 읽기 (TXT는 가볍기 때문에 동기로 충분)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
             
             # 캐싱
-            self._cache[filename] = data
+            self._cache[filename] = content
             logger.info(f"Successfully loaded prompt: {filename}")
             
-            return data
+            return content
             
-        except yaml.YAMLError as e:
-            error_msg = f"YAML 파싱 오류 ({filename}): {str(e)}"
-            logger.error(error_msg)
-            raise yaml.YAMLError(error_msg)
         except Exception as e:
             error_msg = f"파일 읽기 오류 ({filename}): {str(e)}"
             logger.error(error_msg)
             raise Exception(error_msg)
     
-    def load_sync(self, filename: str) -> dict:
+    def load_sync(self, filename: str) -> str:
         """
-        YAML 프롬프트 파일 동기 로드 (테스트용)
+        TXT 프롬프트 파일 동기 로드
         
         Args:
-            filename: YAML 파일명
+            filename: TXT 파일명
             
         Returns:
-            YAML 내용을 딕셔너리로 반환
+            프롬프트 텍스트 문자열
         """
         # 캐시 확인
         if filename in self._cache:
@@ -91,13 +88,13 @@ class PromptLoader:
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
+                content = f.read()
             
-            self._cache[filename] = data
-            return data
+            self._cache[filename] = content
+            return content
             
-        except yaml.YAMLError as e:
-            raise yaml.YAMLError(f"YAML 파싱 오류 ({filename}): {str(e)}")
+        except Exception as e:
+            raise Exception(f"파일 읽기 오류 ({filename}): {str(e)}")
     
     def clear_cache(self):
         """캐시 초기화"""
@@ -110,9 +107,35 @@ class PromptLoader:
             "cached_files": len(self._cache),
             "files": list(self._cache.keys())
         }
+    
+    def get_fallback_prompt(self, prompt_type: str) -> str:
+        """
+        프롬프트 파일이 없을 때 사용할 기본 프롬프트
+        
+        Args:
+            prompt_type: 'summarizer', 'refiner', 'validator'
+            
+        Returns:
+            기본 프롬프트 문자열
+        """
+        fallbacks = {
+            'summarizer': """당신은 복지 문서에서 어려운 키워드를 추출하는 전문가입니다.
+개념적 키워드를 우선 추출하고, 단편적 정보(날짜, URL)는 제외하세요.
+반드시 JSON 형식으로만 응답하세요.""",
+            
+            'refiner': """당신은 어려운 키워드를 초등 6학년 수준으로 순화하는 전문가입니다.
+숫자는 절대 변경하지 말고, 개념의 핵심 의미를 보존하세요.
+반드시 JSON 형식으로만 응답하세요.""",
+            
+            'validator': """당신은 키워드와 순화 결과를 검증하는 전문가입니다.
+숫자 정확성, 개념 보존, 마크다운 형식을 확인하세요.
+반드시 JSON 형식으로만 응답하세요."""
+        }
+        
+        return fallbacks.get(prompt_type, '프롬프트를 찾을 수 없습니다.')
 
 
-# 싱글톤 인스턴스 (선택사항)
+# 싱글톤 인스턴스
 _prompt_loader_instance: Optional[PromptLoader] = None
 
 def get_prompt_loader() -> PromptLoader:
@@ -121,25 +144,6 @@ def get_prompt_loader() -> PromptLoader:
     if _prompt_loader_instance is None:
         _prompt_loader_instance = PromptLoader()
     return _prompt_loader_instance
-
-
-# 하위 호환성을 위한 함수들 (기존 코드와 호환)
-def get_human_guideline(filename: str = "summarizer.yaml") -> Optional[dict]:
-    """
-    레거시 함수 - 하위 호환성 유지
-    
-    Args:
-        filename: YAML 파일명
-        
-    Returns:
-        YAML 데이터 또는 None
-    """
-    try:
-        loader = get_prompt_loader()
-        return loader.load_sync(filename)
-    except Exception as e:
-        logger.error(f"Failed to load guideline: {str(e)}")
-        return None
 
 
 # 테스트 코드
@@ -153,27 +157,34 @@ if __name__ == "__main__":
         
         # 1. Summarizer 로드
         try:
-            summarizer = await loader.load("summarizer.yaml")
-            print(f"✅ Summarizer 로드 성공: {summarizer.get('agent_name')}")
+            summarizer = await loader.load("summarizer_prompt.txt")
+            print(f"✅ Summarizer 로드 성공 (길이: {len(summarizer)} 문자)")
+            print(f"   첫 50자: {summarizer[:50]}...")
         except Exception as e:
             print(f"❌ Summarizer 로드 실패: {e}")
         
         # 2. Refiner 로드
         try:
-            refiner = await loader.load("refiner.yaml")
-            print(f"✅ Refiner 로드 성공: {refiner.get('agent_name')}")
+            refiner = await loader.load("refiner_prompt.txt")
+            print(f"✅ Refiner 로드 성공 (길이: {len(refiner)} 문자)")
+            print(f"   첫 50자: {refiner[:50]}...")
         except Exception as e:
             print(f"❌ Refiner 로드 실패: {e}")
         
         # 3. Validator 로드
         try:
-            validator = await loader.load("validator.yaml")
-            print(f"✅ Validator 로드 성공: {validator.get('agent_name')}")
+            validator = await loader.load("validator_prompt.txt")
+            print(f"✅ Validator 로드 성공 (길이: {len(validator)} 문자)")
+            print(f"   첫 50자: {validator[:50]}...")
         except Exception as e:
             print(f"❌ Validator 로드 실패: {e}")
         
         # 4. 캐시 정보
         print(f"\n📦 캐시 정보: {loader.get_cache_info()}")
+        
+        # 5. Fallback 테스트
+        print(f"\n🔄 Fallback 프롬프트:")
+        print(f"   Summarizer: {loader.get_fallback_prompt('summarizer')[:50]}...")
     
     # 비동기 실행
     asyncio.run(test_loader())

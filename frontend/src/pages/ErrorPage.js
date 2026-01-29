@@ -114,7 +114,7 @@ export default function ErrorPage({ statusCode = 404, onHome }) {
                         </p>
                         <p className="text-center mt-2">
                             <a 
-                                href="mailto:support@easywelfare.com" 
+                                href="https://forms.gle/8VAbzj9QdYsohzdy9"
                                 className="text-blue-600 hover:underline font-semibold text-xs"
                             >
                                 문의하기

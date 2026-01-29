@@ -1,16 +1,16 @@
 import os
 import json
-import aiofiles
 from typing import Dict, List
 from openai import AsyncAzureOpenAI
 from app.core.config import settings
-from app.agents.human import PromptLoader
+from app.agents.human import get_prompt_loader
+from app.core.logger import logger
 
 class LLMHandler:
     """
-    Azure OpenAI 통합 핸들러
-    - Summarizer: 복지 정보 요약
-    - Refiner: 언어 순화
+    Azure OpenAI 통합 핸들러 (TXT 프롬프트 버전)
+    - Summarizer: 키워드 추출
+    - Refiner: 키워드 순화
     - Validator: 품질 검증
     - Image Processing: 이미지 기반 문서 처리
     """
@@ -24,129 +24,209 @@ class LLMHandler:
         )
         
         # 프롬프트 로더 초기화
-        self.prompt_loader = PromptLoader()
+        self.prompt_loader = get_prompt_loader()
         
-        # 각 에이전트별 시스템 프롬프트 캐싱
-        self._system_prompts = {}
+        # 프롬프트 캐싱
+        self._prompts = {}
+        
+        logger.info("LLMHandler initialized with TXT prompts")
     
-    async def _load_system_prompt(self, agent_type: str) -> str:
+    async def _load_prompt(self, agent_type: str) -> str:
         """
-        에이전트별 시스템 프롬프트 로드
+        에이전트별 프롬프트 로드
         
         Args:
             agent_type: 'summarizer', 'refiner', 'validator'
+            
+        Returns:
+            프롬프트 텍스트
         """
-        if agent_type in self._system_prompts:
-            return self._system_prompts[agent_type]
+        if agent_type in self._prompts:
+            return self._prompts[agent_type]
         
-        # YAML에서 가이드라인 로드
-        guideline = await self.prompt_loader.load(f"{agent_type}.yaml")
+        try:
+            # TXT 파일에서 프롬프트 로드
+            filename = f"{agent_type}_prompt.txt"
+            prompt = await self.prompt_loader.load(filename)
+            
+            # 캐싱
+            self._prompts[agent_type] = prompt
+            logger.info(f"✅ {agent_type} 프롬프트 로드 완료")
+            
+            return prompt
+            
+        except FileNotFoundError:
+            # Fallback 프롬프트 사용
+            logger.warning(f"⚠️ {agent_type} 프롬프트 파일 없음, Fallback 사용")
+            fallback = self.prompt_loader.get_fallback_prompt(agent_type)
+            self._prompts[agent_type] = fallback
+            return fallback
+        except Exception as e:
+            logger.error(f"❌ {agent_type} 프롬프트 로드 실패: {e}")
+            raise
+    
+    # ============= 텍스트 처리 메서드 (새로운 방식) =============
+    
+    async def extract_keywords(self, user_text: str, rag_context: str) -> Dict:
+        """
+        키워드 추출 (Summarizer)
         
-        # 에이전트별 프롬프트 구축
-        if agent_type == "summarizer":
-            prompt = self._build_summarizer_prompt(guideline)
-        elif agent_type == "refiner":
-            prompt = self._build_refiner_prompt(guideline)
-        elif agent_type == "validator":
-            prompt = self._build_validator_prompt(guideline)
-        else:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+        Args:
+            user_text: OCR 추출 텍스트
+            rag_context: RAG 검색 결과
+            
+        Returns:
+            {
+                "title": "# 복지 서비스 명칭",
+                "keywords": [...],
+                "metadata": {...}
+            }
+        """
+        prompt_template = await self._load_prompt("summarizer")
         
-        # 캐싱
-        self._system_prompts[agent_type] = prompt
-        return prompt
+        user_message = f"""
+{prompt_template}
+
+[원문]
+{user_text[:2000]}
+
+[RAG 검색 결과]
+{rag_context[:2000]}
+"""
+        
+        try:
+            response = await self.client.chat.completions.create(
+                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
+                messages=[{"role": "user", "content": user_message}],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=2000
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"📌 키워드 추출: {result.get('metadata', {}).get('total_keywords', 0)}개")
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON 파싱 오류: {e}")
+            return {
+                "title": "# 복지 서비스",
+                "keywords": [],
+                "metadata": {"total_keywords": 0}
+            }
+        except Exception as e:
+            logger.error(f"❌ 키워드 추출 오류: {e}")
+            raise
     
-    def _build_summarizer_prompt(self, guideline: dict) -> str:
-        """요약 에이전트 프롬프트 생성"""
-        return f"""
-<role>
-{guideline['role']}
-{guideline['objective_persona']}
-</role>
+    async def refine_keywords(self, keywords_json: Dict, level: int = 13) -> Dict:
+        """
+        키워드 순화 (Refiner)
+        
+        Args:
+            keywords_json: extract_keywords()의 출력
+            level: 난이도 (7=유치원, 13=초등6학년)
+            
+        Returns:
+            {
+                "title": "# 복지 서비스 명칭",
+                "keywords": [...], (refined_context 추가됨)
+                "metadata": {...}
+            }
+        """
+        prompt_template = await self._load_prompt("refiner")
+        
+        user_message = f"""
+{prompt_template}
 
-<extraction_targets>
-추출 우선순위:
-- 대상: {guideline['extraction_targets']['target_audience']}
-- 혜택: {guideline['extraction_targets']['benefits']}
-- 조건: {guideline['extraction_targets']['conditions']}
-- 방법: {guideline['extraction_targets']['how_to_apply']}
-</extraction_targets>
+[입력 JSON]
+{json.dumps(keywords_json, ensure_ascii=False, indent=2)}
 
-<execution_rules>
-1. {guideline['rules_for_precision']['quantitative_focus']['description']}
-   예시: {guideline['rules_for_precision']['quantitative_focus']['example']}
-2. {guideline['rules_for_precision']['structural_summary']['description']}
-3. {guideline['rules_for_precision']['no_inference']['description']}
-</execution_rules>
-
-<constraints>
-{chr(10).join([f"- {c}" for c in guideline['constraints']])}
-</constraints>
-
-<output_format>
-반드시 아래 JSON 구조로만 응답하십시오:
-{guideline['output_format']['json_structure']}
-</output_format>
-""".strip()
+[난이도]
+읽기 수준: Level {level}
+"""
+        
+        try:
+            response = await self.client.chat.completions.create(
+                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
+                messages=[{"role": "user", "content": user_message}],
+                response_format={"type": "json_object"},
+                temperature=0.5,
+                max_tokens=3000
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"✏️ 키워드 순화: {result.get('metadata', {}).get('total_keywords', 0)}개")
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON 파싱 오류: {e}")
+            return keywords_json  # Fallback: 입력 그대로 반환
+        except Exception as e:
+            logger.error(f"❌ 키워드 순화 오류: {e}")
+            raise
     
-    def _build_refiner_prompt(self, guideline: dict) -> str:
-        """정제 에이전트 프롬프트 생성"""
-        return f"""
-<role>
-{guideline['role']}
-{guideline['objective_persona']}
-</role>
+    async def validate_keywords(self, original_text: str, refined_json: Dict) -> Dict:
+        """
+        품질 검증 (Validator)
+        
+        Args:
+            original_text: 원본 텍스트
+            refined_json: refine_keywords()의 출력
+            
+        Returns:
+            {
+                "passed": bool,
+                "score": int,
+                "validation_details": {...},
+                "final_verdict": str,
+                "recommendations": [...]
+            }
+        """
+        prompt_template = await self._load_prompt("validator")
+        
+        user_message = f"""
+{prompt_template}
 
-<rules_by_level>
-- Level 13 (초등 6학년): {guideline['rules_by_level']['level_13']['description']}
-- Level 7 (유치원): {guideline['rules_by_level']['level_7']['description']}
-</rules_by_level>
+[원본 텍스트]
+{original_text[:2000]}
 
-<constraints>
-{chr(10).join([f"- {c}" for c in guideline['constraints']])}
-</constraints>
-
-<output_format>
-반드시 아래 JSON 구조로만 응답하십시오:
-{guideline['output_format']['json_structure']}
-</output_format>
-""".strip()
+[검증 대상 JSON]
+{json.dumps(refined_json, ensure_ascii=False, indent=2)}
+"""
+        
+        try:
+            response = await self.client.chat.completions.create(
+                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
+                messages=[{"role": "user", "content": user_message}],
+                response_format={"type": "json_object"},
+                temperature=0.0,
+                max_tokens=2000
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"🔍 검증: {result.get('final_verdict')} (점수: {result.get('score')})")
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON 파싱 오류: {e}")
+            return {
+                "passed": True,
+                "score": 0,
+                "final_verdict": "검증 오류 - 기본 통과",
+                "recommendations": ["검증 시스템 오류로 인한 자동 승인"]
+            }
+        except Exception as e:
+            logger.error(f"❌ 검증 오류: {e}")
+            raise
     
-    def _build_validator_prompt(self, guideline: dict) -> str:
-        """검증 에이전트 프롬프트 생성"""
-        return f"""
-<role>
-{guideline['role']}
-{guideline['objective_persona']}
-</role>
-
-<checkpoints>
-1. 팩트 체크: {guideline['validation_checkpoints']['fact_accuracy']}
-2. 완전성: {guideline['validation_checkpoints']['completeness']}
-3. 중립성: {guideline['validation_checkpoints']['neutrality']}
-4. 안전성: {guideline['validation_checkpoints']['safety']}
-</checkpoints>
-
-<rules>
-- {guideline['rules_for_verification']['binary_judgment']['description']}
-- {guideline['rules_for_verification']['evidence_required']['description']}
-</rules>
-
-<constraints>
-{chr(10).join([f"- {c}" for c in guideline['constraints']])}
-</constraints>
-
-<output_format>
-Return only the following JSON structure:
-{guideline['output_format']['json_structure']}
-</output_format>
-""".strip()
-    
-    # ============= 텍스트 처리 메서드 =============
+    # ============= 레거시 메서드 (하위 호환성) =============
     
     async def summarize(self, content: str) -> str:
         """
-        1단계: 복지 정보 요약
+        [레거시] 1단계: 복지 정보 요약
         
         Args:
             content: 요약할 원문
@@ -154,15 +234,16 @@ Return only the following JSON structure:
         Returns:
             요약된 텍스트
         """
-        system_prompt = await self._load_system_prompt("summarizer")
+        logger.warning("⚠️ 레거시 메서드 사용: summarize() → extract_keywords() 권장")
         
+        # 간단한 요약 프롬프트
         response = await self.client.chat.completions.create(
             model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": "복지 정보를 간결하게 요약하세요."},
                 {"role": "user", "content": content}
             ],
-            temperature=0.3,  # 정확성 중시
+            temperature=0.3,
             max_tokens=1000
         )
         
@@ -170,7 +251,7 @@ Return only the following JSON structure:
     
     async def refine(self, content: str, level: int = 13) -> str:
         """
-        2단계: 언어 순화 (난이도 조정)
+        [레거시] 2단계: 언어 순화
         
         Args:
             content: 순화할 텍스트
@@ -179,21 +260,20 @@ Return only the following JSON structure:
         Returns:
             순화된 텍스트
         """
-        system_prompt = await self._load_system_prompt("refiner")
+        logger.warning("⚠️ 레거시 메서드 사용: refine() → refine_keywords() 권장")
         
         user_message = f"""
 난이도: Level {level}
 처리할 텍스트:
 {content}
+
+위 텍스트를 초등학생도 이해할 수 있도록 쉽게 바꿔주세요.
 """
         
         response = await self.client.chat.completions.create(
             model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ],
-            temperature=0.5,  # 창의성 약간 허용
+            messages=[{"role": "user", "content": user_message}],
+            temperature=0.5,
             max_tokens=1500
         )
         
@@ -201,7 +281,7 @@ Return only the following JSON structure:
     
     async def validate(self, original: str, processed: str) -> str:
         """
-        3단계: 품질 검증
+        [레거시] 3단계: 품질 검증
         
         Args:
             original: 원본 텍스트
@@ -210,7 +290,7 @@ Return only the following JSON structure:
         Returns:
             검증 결과 (JSON 형식)
         """
-        system_prompt = await self._load_system_prompt("validator")
+        logger.warning("⚠️ 레거시 메서드 사용: validate() → validate_keywords() 권장")
         
         user_message = f"""
 원문:
@@ -219,22 +299,19 @@ Return only the following JSON structure:
 처리된 텍스트:
 {processed}
 
-위 두 텍스트를 비교하여 검증해주세요.
+위 두 텍스트를 비교하여 검증해주세요. JSON 형식으로 응답하세요.
 """
         
         response = await self.client.chat.completions.create(
             model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ],
-            temperature=0.1,  # 엄격한 검증
+            messages=[{"role": "user", "content": user_message}],
+            temperature=0.1,
             max_tokens=1000
         )
         
         return response.choices[0].message.content
     
-    # ============= 이미지 처리 메서드 =============
+    # ============= 이미지 처리 메서드 (유지) =============
     
     async def validate_image_quality(self, base64_image: str) -> Dict:
         """
@@ -261,164 +338,21 @@ Return only the following JSON structure:
                         "content": [
                             {
                                 "type": "text",
-                                "text": """이 이미지의 품질을 평가하고 텍스트 추출 가능성을 판단해주세요.
+                                "text": """이 이미지의 품질을 평가해주세요.
 
-검증 항목:
-1. 해상도 - 텍스트가 선명하게 보이는가?
-2. 조명 - 너무 어둡거나 밝지 않은가?
-3. 초점 - 텍스트가 흐릿하지 않은가?
-4. 회전/기울기 - 문서가 바르게 정렬되어 있는가?
-5. 텍스트 존재 - 추출할 텍스트가 있는가?
+평가 기준:
+1. 해상도 (선명도)
+2. 밝기 및 대비
+3. 텍스트 가독성
+4. 전체적인 이미지 품질
 
 JSON 형식으로 응답:
 {
     "is_acceptable": true/false,
     "quality_score": 0-100,
-    "resolution": "고해상도/중간/저해상도",
-    "issues": ["발견된 문제점들"],
-    "recommendations": ["개선 방법들"]
-}"""
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=1000,
-                temperature=0.1
-            )
-            
-            # JSON 파싱
-            content = response.choices[0].message.content
-            # Markdown 코드 블록 제거
-            if content.startswith("```json"):
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```"):
-                content = content.split("```")[1].split("```")[0].strip()
-            
-            return json.loads(content)
-            
-        except Exception as e:
-            raise Exception(f"이미지 품질 검증 실패: {str(e)}")
-    
-    async def extract_key_information(self, text: str) -> Dict:
-        """
-        복지 문서에서 핵심 정보 자동 추출
-        
-        Args:
-            text: OCR로 추출된 텍스트
-            
-        Returns:
-            {
-                "document_type": str,
-                "target_audience": str,
-                "benefits": List[str],
-                "eligibility": Dict,
-                "application_method": str,
-                "deadline": str,
-                "contact": str,
-                "required_documents": List[str]
-            }
-        """
-        try:
-            response = await self.client.chat.completions.create(
-                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """당신은 복지 문서에서 핵심 정보를 추출하는 전문가입니다.
-다음 정보를 정확하게 파싱하세요:
-- 문서 유형 (공고문/신청서/안내문)
-- 지원 대상
-- 혜택 내용
-- 자격 조건 (소득, 나이 등)
-- 신청 방법
-- 신청 기한
-- 문의처
-- 제출 서류"""
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""다음 복지 문서에서 핵심 정보를 추출해주세요:
-
-{text}
-
-JSON 형식으로 응답:
-{{
-    "document_type": "공고문/신청서/안내문/기타",
-    "target_audience": "지원 대상 요약",
-    "benefits": ["혜택1", "혜택2"],
-    "eligibility": {{
-        "income": "소득 조건",
-        "age": "나이 조건",
-        "other": "기타 조건"
-    }},
-    "application_method": "신청 방법",
-    "deadline": "신청 기한",
-    "contact": "문의처",
-    "required_documents": ["서류1", "서류2"]
-}}
-
-정보가 없으면 null로 표시하세요."""
-                    }
-                ],
-                max_tokens=1500,
-                temperature=0.2
-            )
-            
-            # JSON 파싱
-            content = response.choices[0].message.content
-            if content.startswith("```json"):
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```"):
-                content = content.split("```")[1].split("```")[0].strip()
-            
-            return json.loads(content)
-            
-        except Exception as e:
-            raise Exception(f"핵심 정보 추출 실패: {str(e)}")
-    
-    async def classify_document_type(self, base64_image: str) -> Dict:
-        """
-        문서 타입 자동 분류
-        
-        Args:
-            base64_image: Base64 인코딩된 이미지
-            
-        Returns:
-            {
-                "document_type": str,
-                "confidence": float,
-                "characteristics": List[str]
-            }
-        """
-        try:
-            response = await self.client.chat.completions.create(
-                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": """이 문서의 유형을 분류해주세요.
-
-분류 기준:
-- 공고문: 복지 제도 안내, 공지 형식
-- 신청서: 신청인 정보 입력 양식
-- 안내문: 상세 절차 설명
-- 증빙서류: 소득증명, 주민등록등본 등
-- 기타: 위에 해당하지 않음
-
-JSON 형식으로 응답:
-{
-    "document_type": "공고문/신청서/안내문/증빙서류/기타",
-    "confidence": 0.0-1.0,
-    "characteristics": ["이 분류의 근거들"]
+    "resolution": "high/medium/low",
+    "issues": ["문제점1", "문제점2"],
+    "recommendations": ["권장사항1", "권장사항2"]
 }"""
                             },
                             {
@@ -444,20 +378,59 @@ JSON 형식으로 응답:
             return json.loads(content)
             
         except Exception as e:
-            raise Exception(f"문서 타입 분류 실패: {str(e)}")
+            raise Exception(f"이미지 품질 검증 실패: {str(e)}")
     
-    async def extract_structured_data(self, base64_image: str) -> Dict:
+    async def extract_text_from_image(self, base64_image: str) -> str:
         """
-        테이블/표 형태 데이터를 구조화된 JSON으로 변환
+        이미지에서 텍스트 추출 (OCR)
+        
+        Args:
+            base64_image: Base64 인코딩된 이미지
+            
+        Returns:
+            추출된 텍스트
+        """
+        try:
+            response = await self.client.chat.completions.create(
+                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "이미지에 있는 모든 텍스트를 정확하게 추출해주세요."
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.1
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            raise Exception(f"텍스트 추출 실패: {str(e)}")
+    
+    async def classify_document_type(self, base64_image: str) -> Dict:
+        """
+        문서 타입 자동 분류
         
         Args:
             base64_image: Base64 인코딩된 이미지
             
         Returns:
             {
-                "tables": List[Dict],
-                "has_tables": bool,
-                "table_count": int
+                "document_type": "공고문/신청서/안내문/기타",
+                "confidence": float,
+                "characteristics": List[str]
             }
         """
         try:
@@ -469,30 +442,20 @@ JSON 형식으로 응답:
                         "content": [
                             {
                                 "type": "text",
-                                "text": """이미지에서 표(테이블) 데이터를 추출하여 JSON으로 변환해주세요.
+                                "text": """이 문서의 타입을 분류해주세요.
 
-변환 규칙:
-1. 각 표를 별도의 객체로 분리
-2. 헤더와 데이터 행 구분
-3. 수치 데이터는 숫자로, 텍스트는 문자열로
+문서 타입:
+- 공고문: 복지 혜택을 알리는 공식 문서
+- 신청서: 복지 신청을 위한 양식
+- 안내문: 복지 제도 설명 자료
+- 기타: 위에 해당하지 않는 문서
 
-JSON 형식:
+JSON 형식으로 응답:
 {
-    "has_tables": true/false,
-    "table_count": 숫자,
-    "tables": [
-        {
-            "title": "표 제목",
-            "headers": ["헤더1", "헤더2"],
-            "rows": [
-                {"헤더1": "값1", "헤더2": "값2"},
-                ...
-            ]
-        }
-    ]
-}
-
-표가 없으면 has_tables: false, tables: []로 응답"""
+    "document_type": "공고문/신청서/안내문/기타",
+    "confidence": 0.0-1.0,
+    "characteristics": ["특징1", "특징2"]
+}"""
                             },
                             {
                                 "type": "image_url",
@@ -503,7 +466,7 @@ JSON 형식:
                         ]
                     }
                 ],
-                max_tokens=2500,
+                max_tokens=500,
                 temperature=0.1
             )
             
@@ -517,175 +480,10 @@ JSON 형식:
             return json.loads(content)
             
         except Exception as e:
-            raise Exception(f"구조화 데이터 추출 실패: {str(e)}")
-    
-    async def process_multiple_images(self, images: List[str]) -> Dict:
-        """
-        여러 페이지 문서 통합 처리
-        
-        Args:
-            images: Base64 인코딩된 이미지 리스트
-            
-        Returns:
-            {
-                "combined_text": str,
-                "page_count": int,
-                "page_order": List[int]
-            }
-        """
-        try:
-            # 각 이미지에서 텍스트 추출 (간단한 OCR)
-            extracted_texts = []
-            for idx, img in enumerate(images):
-                # 여기서는 간단히 각 이미지를 Vision API로 처리
-                response = await self.client.chat.completions.create(
-                    model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": "이 이미지에서 모든 텍스트를 추출해주세요."
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{img}"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    max_tokens=1000,
-                    temperature=0.1
-                )
-                
-                text = response.choices[0].message.content
-                extracted_texts.append({
-                    "page": idx + 1,
-                    "text": text
-                })
-            
-            # 페이지 순서 자동 정렬 및 통합
-            response = await self.client.chat.completions.create(
-                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "여러 페이지의 텍스트를 논리적 순서로 정렬하고 통합하세요."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""다음 페이지들을 올바른 순서로 정렬하고 통합해주세요:
-
-{json.dumps(extracted_texts, ensure_ascii=False, indent=2)}
-
-JSON 형식으로 응답:
-{{
-    "combined_text": "통합된 전체 텍스트",
-    "page_count": {len(images)},
-    "page_order": [정렬된 페이지 번호들],
-    "rationale": "정렬 근거"
-}}"""
-                    }
-                ],
-                max_tokens=3000,
-                temperature=0.2
-            )
-            
-            # JSON 파싱
-            content = response.choices[0].message.content
-            if content.startswith("```json"):
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```"):
-                content = content.split("```")[1].split("```")[0].strip()
-            
-            return json.loads(content)
-            
-        except Exception as e:
-            raise Exception(f"다중 이미지 처리 실패: {str(e)}")
-    
-    async def validate_with_feedback(
-        self, 
-        extracted_text: str, 
-        base64_image: str
-    ) -> Dict:
-        """
-        검증 + 개선 제안
-        
-        Args:
-            extracted_text: 추출된 텍스트
-            base64_image: 원본 이미지
-            
-        Returns:
-            {
-                "is_valid": bool,
-                "confidence_score": int,
-                "issues": List[Dict],
-                "feedback": Dict
-            }
-        """
-        try:
-            response = await self.client.chat.completions.create(
-                model=settings.AZURE_OPENAI_API_DEPLOYMENT_NAME,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": f"""다음 텍스트가 이미지에서 정확하게 추출되었는지 검증하고,
-문제가 있다면 구체적인 개선 방법을 제시해주세요.
-
-추출된 텍스트:
-{extracted_text}
-
-JSON 형식으로 응답:
-{{
-    "is_valid": true/false,
-    "confidence_score": 0-100,
-    "issues": [
-        {{
-            "type": "누락/오타/순서오류/기타",
-            "location": "문제가 발생한 위치",
-            "description": "구체적 설명"
-        }}
-    ],
-    "feedback": {{
-        "user_action": "사용자가 해야 할 조치",
-        "technical_issue": "기술적 문제점",
-        "retry_recommended": true/false
-    }}
-}}"""
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=1500,
-                temperature=0.1
-            )
-            
-            # JSON 파싱
-            content = response.choices[0].message.content
-            if content.startswith("```json"):
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```"):
-                content = content.split("```")[1].split("```")[0].strip()
-            
-            return json.loads(content)
-            
-        except Exception as e:
-            raise Exception(f"피드백 검증 실패: {str(e)}")
+            raise Exception(f"문서 타입 분류 실패: {str(e)}")
 
 
-# 싱글톤 인스턴스 (선택사항)
+# 싱글톤 인스턴스
 _llm_handler_instance = None
 
 def get_llm_handler() -> LLMHandler:
