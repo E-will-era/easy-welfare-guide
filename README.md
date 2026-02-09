@@ -1,4 +1,4 @@
-#  <img src="./images/favicon.png" width="28" height="28" style="vertical-align: middle;"/> 이음:새 (Connecting Bridge)
+#  <img src="./image/favicon.png" width="28" height="28" style="vertical-align: middle;"/> 이음:새 (Connecting Bridge)
 
 > **이**해가 안될 때  
 > **음**, 이게 뭘까 싶을 때  
