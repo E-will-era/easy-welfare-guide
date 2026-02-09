@@ -49,7 +49,7 @@
 </p>
 
 ### 데모 영상
-📹 [YouTube에서 데모 영상 보기 (Shorts)](https://youtube.com/shorts/KfCIdV4QthY?feature=share)
+📹 [YouTube에서 데모 영상 보기](https://youtube.com/shorts/KfCIdV4QthY?feature=share)
 
 사용자가 복지 공지를 업로드하고, 쉬운 버전으로 변환하는 전체 과정을 영상으로 확인하실 수 있습니다.
 
