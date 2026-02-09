@@ -1,4 +1,4 @@
-# 이음:새 
+#  <img src="./images/favicon.png" width="28" height="28" style="vertical-align: middle;"/> 이음:새 (Connecting Bridge)
 
 > **이**해가 안될 때  
 > **음**, 이게 뭘까 싶을 때  
@@ -40,12 +40,12 @@
 
 ### 데스크톱 웹
 <p align="center">
-  <img src="./images/desktop_main.png" alt="데스크톱 메인 화면" width="600"/>
+  <img src="./image/desktop_main.png" alt="데스크톱 메인 화면" width="600"/>
 </p>
 
 ### 모바일 웹
 <p align="center">
-  <img src="./images/mobile_main.png" alt="모바일 메인 화면" width="300"/>
+  <img src="./image/mobile_main.png" alt="모바일 메인 화면" width="300"/>
 </p>
 
 ### 데모 영상
@@ -56,7 +56,7 @@
 ## 🏗 시스템 아키텍처
 
 ### 전체 시스템 구조
-![시스템 아키텍처](./images/system_architecture.png)
+![시스템 아키텍처](./image/system_architecture.png)
 
 이음:새는 **Multi-Agent AI 시스템**과 **RAG(Retrieval-Augmented Generation)** 기술을 기반으로 구성되어 있습니다.
 
@@ -73,12 +73,12 @@
 - **BGE-Reranker**: 검색 결과 재순위화로 정확도 향상
 
 ### 서비스 플로우
-![서비스 플로우](./images/flow_chart.png)
+![서비스 플로우](./image/flow_chart.png)
 
 사용자가 복지 공지문을 업로드하면, AI가 자동으로 분석하여 2단계 난이도(13세/7세 수준)로 변환합니다. 사용자는 이해하기 쉬운 버전과 원문 링크, 상세 정보를 함께 확인할 수 있습니다.
 
 ### RAG 검색 워크플로우
-![RAG 검색 워크플로우](./images/RAG_serching_workflow.png)
+![RAG 검색 워크플로우](./image/RAG_serching_workflow.png)
 
 #### Hybrid Search 전략
 1. **시맨틱 분석**: BAAI/bge-m3 모델로 의미 기반 벡터 검색
