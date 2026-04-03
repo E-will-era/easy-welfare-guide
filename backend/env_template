@@ -1,0 +1,55 @@
+# ============================================================
+# Easy Welfare Guide - Environment Variable Configuration
+# ============================================================
+# Copy this file to .env and fill in your values.
+# Never commit real API keys to Git!
+
+# ------------------------------------------------------------
+# LLM Configuration (required)
+# Supports any OpenAI-compatible endpoint, e.g. vLLM serving EXAONE
+# ------------------------------------------------------------
+LLM_API_KEY=your-api-key-here
+LLM_BASE_URL=http://localhost:8000/v1
+LLM_MODEL_NAME=LGAI-EXAONE/EXAONE-3.5-32B-Instruct
+
+# ------------------------------------------------------------
+# Application Settings
+# ------------------------------------------------------------
+ENVIRONMENT=development
+DEBUG=True
+
+# ------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------
+LOG_LEVEL=INFO
+LOG_FILE=logs/easy-welfare-guide.log
+
+# ------------------------------------------------------------
+# Server
+# ------------------------------------------------------------
+HOST=0.0.0.0
+PORT=8000
+
+# ------------------------------------------------------------
+# CORS Settings
+# ------------------------------------------------------------
+# Development: * (allow all origins)
+# Production: specific domains only (comma-separated)
+# Example: https://your-app.hf.space,https://your-domain.com
+CORS_ORIGINS=*
+
+# ------------------------------------------------------------
+# Upstage OCR Settings
+# ------------------------------------------------------------
+UPSTAGE_API_KEY=your-upstage-api-key-here
+
+# ------------------------------------------------------------
+# HuggingFace Settings
+# ------------------------------------------------------------
+HF_TOKEN=your-hf-token-here
+
+# Local development: False (use local vectordb)
+# HF Spaces: True (download from HuggingFace)
+USE_HF_DATASET=False
+HF_DATASET_REPO_ID=E-will-era/welfare-rag-vectors
+HF_USE_RAW_FILES=True

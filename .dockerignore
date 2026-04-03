@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# Node
+frontend/node_modules
+frontend/.pnp
+frontend/.pnp.js
+
+# Python
+backend/venv
+backend/__pycache__
+backend/**/__pycache__
+backend/*.pyc
+backend/.pytest_cache
+
+# Vector DB (HuggingFace에서 다운로드)
+backend/vectordb
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+backend/logs
+
+# Environment
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# Build artifacts
+frontend/build
+
+# Test
+coverage
+.coverage
+
+# Misc
+*.md
+!README_HF.md
+LICENSE
