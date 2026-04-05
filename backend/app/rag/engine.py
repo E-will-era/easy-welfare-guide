@@ -260,7 +260,7 @@ class WelfareRAG:
         
         # 임베딩 함수 설정 (DB 생성 시 사용한 모델과 동일해야 함)
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="BAAI/bge-base-en-v1.5",
+            model_name="BAAI/bge-m3",
             device=device,
             normalize_embeddings=True
         )
