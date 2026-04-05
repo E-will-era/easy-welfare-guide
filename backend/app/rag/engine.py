@@ -141,7 +141,7 @@ def _download_from_huggingface(repo_id: str, vectordb_dir: Path, use_raw_files: 
             # 임베딩 함수 설정
             device = "cuda" if torch.cuda.is_available() else "cpu"
             embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="BAAI/bge-m3",
+                model_name="BAAI/bge-large-en-v1.5",
                 device=device,
                 normalize_embeddings=True
             )
@@ -260,7 +260,7 @@ class WelfareRAG:
         
         # 임베딩 함수 설정 (DB 생성 시 사용한 모델과 동일해야 함)
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="BAAI/bge-m3",
+            model_name="BAAI/bge-large-en-v1.5",
             device=device,
             normalize_embeddings=True
         )
