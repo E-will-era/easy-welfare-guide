@@ -1,11 +1,16 @@
+import asyncio
 import json
 import logging
 from typing import Dict, Any, Optional
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 from app.core.config import settings
 from app.agents.human import PromptLoader
 
 logger = logging.getLogger(__name__)
+
+# 429 Rate Limit 재시도 설정
+_MAX_RETRIES = 4
+_BASE_BACKOFF = 3.0  # 초 단위 (3s → 6s → 12s → 24s 지수 백오프)
 
 
 class LLMHandler:
@@ -101,20 +106,40 @@ class LLMHandler:
 
         # 6. LLM 엔드포인트 호출 (Timeout 방지를 위해 stream=True 강제 사용)
         kwargs["stream"] = True
-        
+
+        # K-EXAONE 리즈닝 모델의 thinking 과정 비활성화 → 응답 속도 개선
+        kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": False},
+            "parse_reasoning": True,
+        }
+
         if response_format == "json_object":
             kwargs["response_format"] = {"type": "json_object"}
             
         full_content = ""
-        response = await self.client.chat.completions.create(**kwargs)
-        
-        async for chunk in response:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            # reasoning_content (사고 과정)은 무시하고 실제 응답인 content만 수집
-            if delta.content is not None:
-                full_content += delta.content
+        for attempt in range(_MAX_RETRIES):
+            try:
+                response = await self.client.chat.completions.create(**kwargs)
+                async for chunk in response:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    # reasoning_content (사고 과정)은 무시하고 실제 응답인 content만 수집
+                    if delta.content is not None:
+                        full_content += delta.content
+                break  # 성공 시 재시도 루프 탈출
+            except RateLimitError as e:
+                if attempt < _MAX_RETRIES - 1:
+                    backoff = _BASE_BACKOFF * (2 ** attempt)
+                    logger.warning(
+                        f"Rate limit hit (attempt {attempt + 1}/{_MAX_RETRIES}). "
+                        f"Retrying in {backoff}s..."
+                    )
+                    await asyncio.sleep(backoff)
+                    full_content = ""  # 이전 부분 응답 초기화
+                else:
+                    logger.error(f"Rate limit exceeded after {_MAX_RETRIES} retries.")
+                    raise
 
         if not full_content:
             if response_format == "json_object":

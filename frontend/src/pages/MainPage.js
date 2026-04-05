@@ -65,6 +65,7 @@ export default function MainPage({ onError }) {
         currentQuestion,
         determination,
         documents,
+        documentLoading,
         questionHistory,
         error: eligibilityError,
         startCheck,
@@ -451,6 +452,8 @@ export default function MainPage({ onError }) {
                                 questionHistory={questionHistory}
                                 error={eligibilityError}
                                 onRequestDocuments={handleRequestDocuments}
+                                hasDocuments={!!documents}
+                                isDocumentLoading={documentLoading}
                             />
                         </Box>
 

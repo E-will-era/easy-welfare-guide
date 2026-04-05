@@ -230,26 +230,12 @@ class WelfareOrchestrator:
 
             logger.info(f"[Retry Phase 1] Refine: {time.perf_counter() - step_start:.2f}s")
 
-            # [Step 2] Hallucination validation (Validator)
-            step_start = time.perf_counter()
-            yield self._progress_event("validate")
-
-            validation_result = await self.llm_handler.run_prompt_template(
-                prompt_file="verification.yaml",
-                variables={
-                    "original": admin_summary,
-                    "target": retry_plain_summary
-                },
-                response_format="json_object"
-            )
-
-            logger.info(f"[Retry Phase 2] Validate: {time.perf_counter() - step_start:.2f}s")
-
-            # [Step 3] Send completion event
+            # [Step 2] Send completion event
+            # 2차 답변은 이미 검증된 admin_summary 기반이므로 별도 validation을 생략하여
+            # LLM 호출을 최소화하고 rate limit 문제를 방지합니다.
             final_data = {
                 "admin_summary": admin_summary,
                 "retry_plain_summary": retry_plain_summary,
-                "validation": validation_result
             }
 
             logger.info("Retry Process Complete")
@@ -285,15 +271,36 @@ class WelfareOrchestrator:
         """
         return self._format_sse("progress", {"status": "processing", "data": {"phase": phase}})
 
+    # 영어 에러 메시지 → 한국어 변환 매핑
+    _ERROR_TRANSLATIONS = [
+        ("Rate limit", "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."),
+        ("rate limit", "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."),
+        ("429", "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."),
+        ("timeout", "서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."),
+        ("Timeout", "서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."),
+        ("connection", "서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요."),
+        ("Connection", "서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요."),
+        ("Text extraction failed", "텍스트 추출에 실패했습니다."),
+        ("not appear to be welfare-related", "복지 관련 문서가 아닌 것으로 판단됩니다."),
+    ]
+
+    def _translate_error(self, message: str) -> str:
+        """영어 에러 메시지에 매칭되는 한국어 메시지를 반환합니다."""
+        for keyword, korean_msg in self._ERROR_TRANSLATIONS:
+            if keyword in message:
+                return korean_msg
+        return "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+
     def _error_event(self, message: str) -> str:
         """
         설명: 사람이 식별할 수 있는 문장 구문으로 파이프라인 내부 에러를 알리는 SSE 생성기.
 
         작동 방식: 내부의 _format_sse 유틸 모듈을 통해 프론트엔드가 약속 및 동의해놓은
             에러 페이로드 규격 { status, data: { message } } 을 따라 호출자 쪽으로
-            오류 원인을 나타냅니다.
-            
+            오류 원인을 나타냅니다. 영어 에러 메시지는 한국어로 변환됩니다.
+
         반환값: SSE-formatted 에러 이벤트 포맷팅 문자열.
         예외: 없음.
         """
-        return self._format_sse("error", {"status": "failed", "data": {"message": message}})
+        user_message = self._translate_error(message)
+        return self._format_sse("error", {"status": "failed", "data": {"message": user_message}})

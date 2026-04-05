@@ -43,10 +43,10 @@ class AnswerRequest(BaseModel):
     Description: Request body for submitting a user's answer during eligibility Q&A.
     Fields:
         session_id — session that owns the active eligibility check
-        answer     — user's response: "O", "X", "예", "아니오", or free text
+        answer     — user's response: "예" or "아니오" (O/X only)
     """
     session_id: str
-    answer: str  # "O", "X", "예", "아니오", or free text
+    answer: str  # "예" or "아니오"
 
 
 class DocumentGuideRequest(BaseModel):

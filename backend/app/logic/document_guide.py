@@ -213,6 +213,9 @@ class DocumentGuideEngine:
         documents = llm_response.get("documents", [])
         if documents:
             llm_response["documents"] = self._enrich_with_database(documents)
+            llm_response["documents"] = self._deduplicate_documents(
+                llm_response["documents"]
+            )
 
         logger.info(
             f"DocumentGuideEngine.generate_document_guide: guide generated with "
@@ -228,52 +231,42 @@ class DocumentGuideEngine:
         """
         설명: 프로그램 관련 필수 서류를 찾기 위해 MCP 포털을 검색합니다.
         작동 방식:
-            1. MCP 검색 쿼리로 사용할 프로그램 정보에서 짧은 프로그램 이름을 추출합니다.
-            2. 한국 정부 포털(정부24, 복지로 등)을 쿼리하고 구조화된 딕셔너리를 반환하는 mcp_client.search_required_documents()를 호출합니다.
-            3. 반환된 서류 딕셔너리 리스트를 LLM 프롬프트 컨텍스트에 주입하기 위해 사람이 읽을 수 있는 다중 행 문자열로 포맷팅합니다.
-            4. 예외 발생 시 경고를 로깅하고 LLM 파이프라인이 중단되지 않도록 자리 표시자 문자열을 반환합니다.
+            1. MCP 검색 쿼리로 사용할 프로그램 정보에서 검색용 키워드를 추출합니다.
+            2. 하드코딩된 필터 없이 일반 search()를 호출하여 원문 조각(Snippet)을 가져옵니다.
+            3. 원문 조각을 사람이 읽을 수 있는 다중 행 문자열로 포맷팅하여 LLM이 스스로 서류를 추출하게 돕습니다.
         반환값: MCP 검색 결과의 포맷팅된 문자열; 실패 시 "검색 결과 없음" 반환.
-        예외: 예외 발생 시 모두 catch 및 로깅 처리됩니다.
         """
-        query = program_info[:80].strip()
+        query = program_info[:80].strip() + " 신청서류 구비서류"
         logger.info(
             f"DocumentGuideEngine._search_documents: querying MCP with '{query}'"
         )
 
         try:
-            raw_docs = await self.mcp_client.search_required_documents(query)
+            results = await self.mcp_client.search(query, top_k=4)
         except Exception as exc:
             logger.warning(
                 f"DocumentGuideEngine._search_documents: MCP search failed: {exc}"
             )
             return "검색 결과 없음"
 
-        if not raw_docs:
+        if not results:
             logger.info(
                 "DocumentGuideEngine._search_documents: MCP returned no documents."
             )
             return "검색 결과 없음"
 
-        # Format the raw document list into readable context lines
+        # Format the raw snippets into readable context lines for LLM
         lines = []
-        for i, doc in enumerate(raw_docs, start=1):
-            doc_name = doc.get("doc_name", "알 수 없음")
-            issuer = doc.get("issuer", "")
-            description = doc.get("description", "")
-            online_url = doc.get("online_url", "")
-            line = f"{i}. {doc_name}"
-            if issuer:
-                line += f" | 발급처: {issuer}"
-            if description:
-                line += f" | 설명: {description}"
-            if online_url:
-                line += f" | URL: {online_url}"
+        for i, doc in enumerate(results, start=1):
+            title = doc.title
+            snippet = doc.snippet
+            line = f"[{i}] 제목: {title}\n내용: {snippet}\n"
             lines.append(line)
 
         result = "\n".join(lines)
         logger.info(
-            f"DocumentGuideEngine._search_documents: formatted {len(raw_docs)} "
-            "MCP documents as context."
+            f"DocumentGuideEngine._search_documents: formatted {len(results)} "
+            "MCP snippets as context."
         )
         return result
 
@@ -307,15 +300,6 @@ class DocumentGuideEngine:
                 if matched_key:
                     db_entry = COMMON_DOCUMENTS[matched_key]
 
-                    # Fill in online_url only if absent
-                    current_url = doc.get("online_url")
-                    if not current_url and db_entry.get("online_url"):
-                        doc["online_url"] = db_entry["online_url"]
-                        logger.debug(
-                            f"DocumentGuideEngine._enrich_with_database: "
-                            f"filled online_url for '{doc_name}' from DB key '{matched_key}'."
-                        )
-
                     # Fill in issuer only if absent
                     current_issuer = doc.get("issuer", "").strip()
                     if not current_issuer and db_entry.get("issuer"):
@@ -335,6 +319,48 @@ class DocumentGuideEngine:
                 enriched.append(doc)  # Preserve the original entry even on error
 
         return enriched
+
+    def _deduplicate_documents(self, documents: List[Dict]) -> List[Dict]:
+        """
+        설명: 서류 목록에서 사실상 동일하거나 포함 관계에 있는 중복 항목을 제거합니다.
+        작동 방식:
+            1. 각 서류 쌍을 비교하여 doc_name 간 포함 관계를 확인합니다.
+               예: '임신확인서'와 '의료비지원신청 및 임신확인서'가 있으면
+               더 구체적인(긴) 명칭만 남깁니다.
+            2. 제거 대상으로 표시된 인덱스를 건너뛰고 나머지만 반환합니다.
+        반환값: 중복이 제거된 서류 딕셔너리 리스트.
+        """
+        if len(documents) <= 1:
+            return documents
+
+        remove_indices = set()
+        names = [doc.get("doc_name", "").strip() for doc in documents]
+
+        for i in range(len(names)):
+            if i in remove_indices or not names[i]:
+                continue
+            for j in range(len(names)):
+                if i == j or j in remove_indices or not names[j]:
+                    continue
+                # names[i]가 names[j]에 포함되면 → i(짧은 쪽) 제거
+                if names[i] in names[j] and names[i] != names[j]:
+                    remove_indices.add(i)
+                    logger.info(
+                        f"DocumentGuideEngine._deduplicate_documents: "
+                        f"'{names[i]}' is contained in '{names[j]}', removing duplicate."
+                    )
+                    break
+
+        if remove_indices:
+            result = [doc for idx, doc in enumerate(documents) if idx not in remove_indices]
+            logger.info(
+                f"DocumentGuideEngine._deduplicate_documents: "
+                f"removed {len(remove_indices)} duplicate(s), "
+                f"{len(result)} documents remaining."
+            )
+            return result
+
+        return documents
 
     def _generate_fallback_guide(self, program_info: str) -> Dict:
         """

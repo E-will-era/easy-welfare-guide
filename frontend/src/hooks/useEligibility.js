@@ -38,6 +38,9 @@ export function useEligibility() {
     // Error message string, or null when no error
     const [error, setError] = useState(null);
 
+    // State for separate document loading indicator
+    const [documentLoading, setDocumentLoading] = useState(false);
+
     /**
      * 설명: 유저 정보 확인용 자격 체크 플로우를 초기업화 하고 스타트 시킵니다.
      * 작동 방식: POST요청을 통해 session 및 info 매개변수를 전송하고 들어온 즉각의 첫번째 질의문을 세팅.
@@ -189,7 +192,7 @@ export function useEligibility() {
             return null;
         }
 
-        setEligibilityStatus('loading');
+        setDocumentLoading(true);
         setError(null);
 
         try {
@@ -212,14 +215,12 @@ export function useEligibility() {
             // Unwrap the {"status":"ok","data":{...}} envelope from the backend
             const data = raw.data || raw;
             setDocuments(data);
-            // Restore status to 'determined' so the eligibility result is still shown
-            setEligibilityStatus('determined');
+            setDocumentLoading(false);
 
             return data;
         } catch (err) {
             setError(err.message || '서류 안내 조회 중 오류가 발생했습니다.');
-            // Restore status to 'determined' even on error so the card stays visible
-            setEligibilityStatus('determined');
+            setDocumentLoading(false);
             return null;
         }
     }, []);
@@ -243,6 +244,7 @@ export function useEligibility() {
         currentQuestion,
         determination,
         documents,
+        documentLoading,
         questionHistory,
         error,
         startCheck,

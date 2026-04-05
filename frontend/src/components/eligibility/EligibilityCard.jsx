@@ -28,6 +28,8 @@ export default function EligibilityCard({
     questionHistory,
     error,
     onRequestDocuments,
+    hasDocuments,
+    isDocumentLoading,
 }) {
 
     /**
@@ -277,27 +279,31 @@ export default function EligibilityCard({
                         )}
                     </Box>
 
-                    {/* Button to fetch document guide */}
-                    <Button
-                        fullWidth
-                        variant="outlined"
-                        onClick={handleRequestDocs}
-                        sx={{
-                            py: 1.5,
-                            borderRadius: '12px',
-                            fontWeight: 700,
-                            fontSize: '0.95rem',
-                            textTransform: 'none',
-                            borderColor: '#3b82f6',
-                            color: '#3b82f6',
-                            '&:hover': {
-                                borderColor: '#1d4ed8',
-                                bgcolor: '#eff6ff',
-                            },
-                        }}
-                    >
-                        📋 필요 서류 확인하기
-                    </Button>
+                    {/* Button to fetch document guide — only when eligible and documents not yet fetched */}
+                    {determination.eligible && !hasDocuments && (
+                        <Button
+                            fullWidth
+                            variant="outlined"
+                            onClick={handleRequestDocs}
+                            disabled={isDocumentLoading}
+                            startIcon={isDocumentLoading ? <CircularProgress size={20} color="inherit" /> : null}
+                            sx={{
+                                py: 1.5,
+                                borderRadius: '12px',
+                                fontWeight: 700,
+                                fontSize: '0.95rem',
+                                textTransform: 'none',
+                                borderColor: '#3b82f6',
+                                color: '#3b82f6',
+                                '&:hover': {
+                                    borderColor: '#1d4ed8',
+                                    bgcolor: '#eff6ff',
+                                },
+                            }}
+                        >
+                            {isDocumentLoading ? '서류 안내 조회 중...' : '📋 필요 서류 확인하기'}
+                        </Button>
+                    )}
                 </Box>
             )}
 

@@ -11,16 +11,19 @@ before a forced determination is requested from the LLM.
 """
 
 import json
+import re
+from datetime import datetime, date
 from typing import Dict, Optional
 
 from app.core.logger import logger
 from app.core.session_manager import SessionData as Session, get_session_manager
 from app.agents.llm_handler import get_llm_handler
+from app.mcp.search_client import get_mcp_client
 
 
 # Path constants for YAML prompt templates
-_ELIGIBILITY_PROMPT = "eligibility.yaml"
-_FOLLOW_UP_PROMPT = "follow_up.yaml"
+_QUESTIONS_PROMPT = "eligibility_questions.yaml"
+_DETERMINE_PROMPT = "eligibility_determine.yaml"
 
 # Korean label map for standard UserProfile fields used in formatted output
 _FIELD_LABELS: Dict[str, str] = {
@@ -35,40 +38,19 @@ _FIELD_LABELS: Dict[str, str] = {
 
 
 class EligibilityEngine:
-    """
-    설명: 사용자가 올바른 복지 혜택 대상인지 평가, 분류하기 위한 코어 자격증명 엔진입니다.
-    작동 방식: 
-        1. 세션 정보를 검증하고, 초기 정보가 구축되어있다면 외부 API를 불러 자격 요건을 가져옵니다. 
-        2. 대화 세션에 존재하는 유저 답변들을 기반으로 O,X 여부를 지속 묻습니다. 
-        3. LLM 을 사용해 대상 조건에 충족하는지 종합적으로 검사 판별합니다.
-    """
-
     MAX_QUESTIONS: int = 7
     MIN_CONFIDENCE: float = 0.7
 
     def __init__(self):
-        # Description: Initializes engine with shared LLM handler and session manager singletons.
-        # How it works: Retrieves the application-wide singletons so they are reused
-        #     across all engine method calls without re-initializing the underlying clients.
-        # Returns: None.
         self.llm = get_llm_handler()
         self.session_mgr = get_session_manager()
+        self.mcp_client = get_mcp_client()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     async def start_eligibility_check(self, session_id: str, program_info: str) -> Dict:
-        """
-        설명: 자격 확인 절차(세션 초기화)를 시작하는 엔진 부팅 프로세스입니다.
-        작동 방식: 
-            1. session_id를 통해 세션 데이터를 로딩 및 타당성 검토.
-            2. MCP Client를 활용해 프로그램의 자격 조건을 추출하고 User Profile에 등록. 
-            3. 자격 조건 리스트를 성공적으로 추출했다면 LLM을 거쳐 즉시 다음 "Question"을 선별하거나 결론도출 진행.
-        반환값: 다음번에 유저에게 표출하게될 상태 딕셔너리형 구문 ('status', 'data' 래핑 포함).
-        예외: 세션 정보가 없거나, MCP와 LLM 등 내부 API 컴포넌트 접속에러가 났을때 
-            안전한 Error dict 덤프 반환 처리됨.
-        """
         session = self.session_mgr.get_session(session_id)
         if session is None:
             logger.error(f"start_eligibility_check: session {session_id!r} not found.")
@@ -79,12 +61,42 @@ class EligibilityEngine:
             f"Program info length: {len(program_info)} chars."
         )
 
-        # Initialize eligibility state for this check
+        # MCP를 통해 정부 포털에서 자격 조건 보완 검색
+        enriched_info = await self._enrich_with_mcp(program_info)
+
+        # 신청 기한 만료 여부 사전 체크
+        expired_reason = self._check_program_expired(enriched_info)
+        if expired_reason:
+            logger.info(
+                f"Program expired for session {session_id}: {expired_reason}"
+            )
+            expired_state = {
+                "status": "determined",
+                "question_count": 0,
+                "program_info": enriched_info,
+                "current_question": None,
+                "question_queue": [],
+                "eligible": False,
+                "confidence": 1.0,
+                "reason": expired_reason,
+            }
+            self.session_mgr.update_eligibility_state(session_id, expired_state)
+            return {
+                "status": "determined",
+                "question": None,
+                "eligible": False,
+                "confidence": 1.0,
+                "reason": expired_reason,
+                "remaining_questions_estimate": 0,
+            }
+
+        # Initialize eligibility state
         initial_state = {
             "status": "questioning",
             "question_count": 0,
-            "program_info": program_info,
+            "program_info": enriched_info,
             "current_question": None,
+            "question_queue": [],
         }
         self.session_mgr.update_eligibility_state(session_id, initial_state)
 
@@ -92,222 +104,293 @@ class EligibilityEngine:
         self.session_mgr.add_message(
             session_id,
             role="system",
-            content=f"복지 프로그램 자격 확인이 시작되었습니다.\n\n[프로그램 정보]\n{program_info}",
+            content=f"복지 프로그램 자격 확인이 시작되었습니다.\n\n[프로그램 정보]\n{enriched_info}",
         )
 
-        # Generate the first question
-        question_result = await self._generate_question(session)
+        # Re-fetch session
+        session = self.session_mgr.get_session(session_id)
 
-        # Persist the current question text so process_answer can reference it
+        # Generate all questions initially
+        questions = await self._generate_questions_queue(session)
+
+        if not questions:
+            logger.warning(f"Failed to generate question queue for session {session_id}, determining immediately.")
+            return await self._run_determination(session_id)
+
+        # Pop first question
+        first_q = questions.pop(0)
+        q_text = first_q.get("question", "질문이 없습니다.")
+
         self.session_mgr.update_eligibility_state(
-            session_id, {"current_question": question_result.get("question")}
+            session_id,
+            {
+                "current_question": q_text,
+                "current_question_meta": {
+                    "field": first_q.get("field", "custom"),
+                    "key": first_q.get("key"),
+                },
+                "question_queue": questions,
+                "question_count": 1,
+            }
         )
 
-        # Add the question as an assistant message
-        if question_result.get("question"):
-            self.session_mgr.add_message(
-                session_id,
-                role="assistant",
-                content=question_result["question"],
-            )
+        if q_text:
+            self.session_mgr.add_message(session_id, role="assistant", content=q_text)
 
-        logger.info(
-            f"First question generated for session {session_id}. "
-            f"Confidence: {question_result.get('confidence', 0):.2f}."
-        )
-        return question_result
+        logger.info(f"First question generated for session {session_id}.")
+        return {
+            "status": "questioning",
+            "question": q_text,
+            "confidence": 0.0,
+            "reason": None,
+            "remaining_questions_estimate": len(questions)
+        }
 
     async def process_answer(self, session_id: str, answer: str) -> Dict:
-        """
-            8. Updates eligibility_state with the result and appends the assistant
-               message if another question was generated.
-        Returns: Dict with keys from the LLM response (status, question or eligible,
-            confidence, reason, remaining_questions_estimate).  When status is
-            "determined", eligible (bool) and reason (str) are populated.
-        Throws: ValueError if the session is not found, has expired, or has no
-            active eligibility check in progress.
-        """
         session = self.session_mgr.get_session(session_id)
         if session is None:
-            logger.error(f"process_answer: session {session_id!r} not found.")
             raise ValueError(f"Session '{session_id}' not found or has expired.")
 
         state = session.eligibility_state
         if state.get("status") not in ("questioning",):
-            logger.warning(
-                f"process_answer: session {session_id} has no active eligibility check "
-                f"(status={state.get('status')!r})."
-            )
-            raise ValueError(
-                "No active eligibility check in progress for this session. "
-                "Call start_eligibility_check first."
-            )
+            raise ValueError("No active eligibility check in progress for this session. Call start_eligibility_check first.")
 
-        logger.info(
-            f"Processing answer for session {session_id}. "
-            f"Question #{state.get('question_count', 0) + 1}."
-        )
+        logger.info(f"Processing answer for session {session_id}. Question #{state.get('question_count', 0)}.")
 
-        # Record the user's answer in conversation history
+        # Record the user's answer
         self.session_mgr.add_message(session_id, role="user", content=answer)
 
-        # Interpret the answer and extract any profile updates
-        interpretation = await self._interpret_answer(session, answer)
-        logger.debug(
-            f"Answer interpretation for session {session_id}: "
-            f"interpreted={interpretation.get('interpreted_answer')!r}, "
-            f"clarification_needed={interpretation.get('clarification_needed')}."
-        )
+        # Interpret the answer (rule-based, no LLM call)
+        interpretation = self._interpret_answer(session, answer)
+        logger.debug(f"Answer interpretation: {interpretation.get('interpreted_answer')!r}")
 
-        # Apply profile updates returned by the LLM interpreter
         profile_updates = interpretation.get("profile_update", {})
         if profile_updates:
             self.session_mgr.update_user_profile(session_id, **profile_updates)
-            logger.debug(
-                f"Profile updated for session {session_id}: {list(profile_updates.keys())}."
-            )
+            logger.debug(f"Profile updated: {list(profile_updates.keys())}.")
 
-        # If the answer was unclear, return a clarification question immediately
-        # without consuming a question slot
-        if interpretation.get("clarification_needed") and interpretation.get("clarification_question"):
-            clarification_q = interpretation["clarification_question"]
-            self.session_mgr.add_message(
-                session_id, role="assistant", content=clarification_q
-            )
-            logger.info(
-                f"Clarification requested for session {session_id}: {clarification_q!r}"
-            )
-            return {
-                "status": "questioning",
-                "question": clarification_q,
-                "clarification": True,
-                "confidence": state.get("last_confidence", 0.0),
-                "reason": "사용자의 답변이 명확하지 않아 추가 확인이 필요합니다.",
-                "remaining_questions_estimate": max(
-                    0, self.MAX_QUESTIONS - state.get("question_count", 0)
-                ),
-            }
-
-        # Increment question counter
+        questions_queue = state.get("question_queue", [])
         new_count = state.get("question_count", 0) + 1
+        
+        if not questions_queue or new_count >= self.MAX_QUESTIONS:
+            logger.info(f"Session {session_id} queue empty or MAX_QUESTIONS reached. Forcing determination.")
+            return await self._run_determination(session_id)
+
+        next_q = questions_queue.pop(0)
+        q_text = next_q.get("question", "질문이 없습니다.")
+
         self.session_mgr.update_eligibility_state(
-            session_id, {"question_count": new_count}
+            session_id,
+            {
+                "current_question": q_text,
+                "current_question_meta": {
+                    "field": next_q.get("field", "custom"),
+                    "key": next_q.get("key"),
+                },
+                "question_queue": questions_queue,
+                "question_count": new_count,
+            }
         )
 
-        # If MAX_QUESTIONS reached, force the LLM to issue a determination
-        if new_count >= self.MAX_QUESTIONS:
-            logger.info(
-                f"Session {session_id} reached MAX_QUESTIONS ({self.MAX_QUESTIONS}). "
-                "Forcing determination."
-            )
-            self.session_mgr.add_message(
-                session_id,
-                role="system",
-                content=(
-                    f"[시스템] 최대 질문 횟수({self.MAX_QUESTIONS}회)에 도달했습니다. "
-                    "지금까지 수집된 정보를 바탕으로 최종 자격 판정을 내려 주세요."
-                ),
-            )
+        if q_text:
+            self.session_mgr.add_message(session_id, role="assistant", content=q_text)
 
-        # Re-fetch session so the updated profile and messages are visible
-        session = self.session_mgr.get_session(session_id)
-
-        # Generate the next question or the final verdict
-        result = await self._generate_question(session)
-
-        if result.get("status") == "determined":
-            # Persist final verdict into eligibility_state
-            self.session_mgr.update_eligibility_state(
-                session_id,
-                {
-                    "status": "determined",
-                    "eligible": result.get("eligible"),
-                    "confidence": result.get("confidence"),
-                    "reason": result.get("reason"),
-                },
-            )
-            logger.info(
-                f"Eligibility determined for session {session_id}: "
-                f"eligible={result.get('eligible')}, "
-                f"confidence={result.get('confidence', 0):.2f}."
-            )
-        else:
-            # Another question — persist it and add assistant message
-            next_question = result.get("question")
-            self.session_mgr.update_eligibility_state(
-                session_id,
-                {
-                    "current_question": next_question,
-                    "last_confidence": result.get("confidence", 0.0),
-                },
-            )
-            if next_question:
-                self.session_mgr.add_message(
-                    session_id, role="assistant", content=next_question
-                )
-            logger.info(
-                f"Next question generated for session {session_id}. "
-                f"question_count={new_count}, "
-                f"confidence={result.get('confidence', 0):.2f}."
-            )
-
-        return result
+        logger.info(f"Next question popped for session {session_id}.")
+        return {
+            "status": "questioning",
+            "question": q_text,
+            "confidence": 0.0,
+            "reason": None,
+            "remaining_questions_estimate": len(questions_queue)
+        }
 
     async def get_eligibility_status(self, session_id: str) -> Dict:
-        """
-        Description: Returns a snapshot of the current eligibility check state
-            together with the user profile's completeness score.
-        How it works: Retrieves the session and merges eligibility_state with
-            profile metadata.  Does not modify any session data.
-        Returns: Dict containing all keys from eligibility_state plus
-            "profile_completeness" (float 0.0–1.0) and "profile" (dict of current
-            user profile fields).
-        Throws: ValueError if the session is not found or has expired.
-        """
         session = self.session_mgr.get_session(session_id)
         if session is None:
-            logger.error(f"get_eligibility_status: session {session_id!r} not found.")
             raise ValueError(f"Session '{session_id}' not found or has expired.")
 
         status_dict = dict(session.eligibility_state)
         status_dict["profile_completeness"] = session.user_profile.completeness_score()
         status_dict["profile"] = session.user_profile.to_dict()
-        logger.debug(
-            f"Eligibility status requested for session {session_id}. "
-            f"completeness={status_dict['profile_completeness']:.2f}."
-        )
         return status_dict
+
+    # ------------------------------------------------------------------
+    # Pre-check helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_program_expired(program_info: str) -> Optional[str]:
+        today = date.today()
+        
+        # 년도 기준 만료 패턴 (2024년 기준 등)
+        current_year = today.year
+        past_year_pattern = re.compile(rf'(20[0-2][0-4])년\s*기준', re.UNICODE)
+        match = past_year_pattern.search(program_info)
+        if match:
+            return f"과거({match.group(1)}년) 기준의 프로그램으로 현재는 신청 기간이 만료되었습니다."
+
+        # 명시적 만료 텍스트 패턴
+        text_patterns = [
+            "기간 지난 공고", "신청기간이 종료되었습니다", "신청 기간 종료",
+            "마감되었습니다", "1차 신청기간 종료"
+        ]
+        for p in text_patterns:
+            if p in program_info:
+                return "신청 기한이 종료된 프로그램입니다."
+
+        date_pattern = r'(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})[일]?'
+
+        def parse_date(m, g_offset=1):
+            try:
+                y = int(m.group(g_offset))
+                mo = int(m.group(g_offset + 1))
+                d = int(m.group(g_offset + 2))
+                return date(y, mo, d)
+            except (ValueError, OverflowError):
+                return None
+
+        range_pattern = re.compile(
+            r'(?:신청기한|접수기간|모집기간|신청기간|사업기간)?'
+            r'[^0-9]{0,15}'
+            + date_pattern
+            + r'\s*[~∼\-]\s*'
+            + date_pattern,
+            re.UNICODE,
+        )
+        for match in range_pattern.finditer(program_info):
+            end_date = parse_date(match, g_offset=4)
+            if end_date and end_date < today:
+                return f"신청 기한이 종료된 프로그램입니다. (마감일: {end_date.year}년 {end_date.month}월 {end_date.day}일)"
+
+        deadline_pattern = re.compile(
+            r'(?:마감|종료|까지|신청기한|접수마감)'
+            r'[^0-9]{0,20}'
+            + date_pattern,
+            re.UNICODE,
+        )
+        for match in deadline_pattern.finditer(program_info):
+            d = parse_date(match)
+            if d and d < today:
+                return f"신청 기한이 종료된 프로그램입니다. (마감일: {d.year}년 {d.month}월 {d.day}일)"
+
+        reverse_pattern = re.compile(
+            date_pattern + r'[^0-9]{0,10}(?:마감|종료|까지)',
+            re.UNICODE,
+        )
+        for match in reverse_pattern.finditer(program_info):
+            d = parse_date(match)
+            if d and d < today:
+                return f"신청 기한이 종료된 프로그램입니다. (마감일: {d.year}년 {d.month}월 {d.day}일)"
+
+        return None
+
+    # ------------------------------------------------------------------
+    # MCP helpers
+    # ------------------------------------------------------------------
+
+    async def _enrich_with_mcp(self, program_info: str) -> str:
+        # Markdown 제거: 헤더, 볼드, 이탤릭, 리스트 마커 등 제거하여 검색에 최적화
+        clean_name = re.sub(r'#+\s*', '', program_info)
+        clean_name = re.sub(r'\*\*|__|\*|_', '', clean_name)
+        clean_name = re.sub(r'^[\s\-*+]+', '', clean_name, flags=re.MULTILINE)
+        
+        # 첫 번째 유의미한 줄 추출
+        lines = [L.strip() for L in clean_name.split('\n') if L.strip()]
+        if lines:
+            program_name = lines[0][:80].strip()
+        else:
+            program_name = clean_name[:80].strip()
+
+        logger.info(f"_enrich_with_mcp: searching eligibility for '{program_name}'")
+
+        try:
+            mcp_result = await self.mcp_client.search_eligibility(
+                program_name=program_name,
+                user_info={},
+            )
+        except Exception as exc:
+            logger.warning(f"_enrich_with_mcp: MCP search failed: {exc}")
+            return program_info
+
+        criteria = mcp_result.get("criteria", [])
+        source_url = mcp_result.get("source_url", "")
+
+        if not criteria:
+            logger.info("_enrich_with_mcp: MCP returned no additional criteria.")
+            return program_info
+
+        mcp_section = "\n\n[정부 포털 참조 자격 조건]\n"
+        mcp_section += "\n".join(f"- {c}" for c in criteria)
+        if source_url:
+            mcp_section += f"\n(출처: {source_url})"
+
+        enriched = program_info + mcp_section
+        logger.info(f"_enrich_with_mcp: enriched program_info with {len(criteria)} criteria from MCP.")
+        return enriched
 
     # ------------------------------------------------------------------
     # LLM helpers
     # ------------------------------------------------------------------
 
-    async def _generate_question(self, session: Session) -> Dict:
-        """
-        Description: Calls the eligibility LLM prompt to generate the next O/X
-            question or issue a final eligibility verdict.
-        How it works: Formats the current user profile and conversation history
-            into human-readable strings, then calls run_prompt_template with
-            eligibility.yaml.  The LLM returns a JSON object that is returned
-            directly to the caller.  On JSON parse failure (indicated by an "error"
-            key in the response) a safe fallback dict is returned so the calling
-            layer can handle the error gracefully.
-        Returns: Dict with keys: status, question, question_field, question_key,
-            eligible, confidence, reason, remaining_questions_estimate.
-        Throws: Nothing — LLM errors are caught and returned as a fallback dict.
-        """
+    async def _generate_questions_queue(self, session: Session) -> list:
+        state = session.eligibility_state
+        program_info = state.get("program_info", "")
+
+        logger.debug(f"_generate_questions_queue called for session {session.session_id}.")
+
+        response = await self.llm.run_prompt_template(
+            prompt_file=_QUESTIONS_PROMPT,
+            variables={"program_info": program_info},
+            response_format="json_object",
+        )
+
+        if "error" in response:
+            logger.error(
+                f"_generate_questions_queue: LLM returned invalid JSON for session "
+                f"{session.session_id}. Raw: {response.get('raw', '')[:200]}"
+            )
+            return []
+
+        return response.get("questions", [])
+
+    async def _run_determination(self, session_id: str) -> Dict:
+        self.session_mgr.add_message(
+            session_id,
+            role="system",
+            content="[시스템] 대답 정보를 바탕으로 최종 자격 판정을 시도합니다."
+        )
+        
+        session = self.session_mgr.get_session(session_id)
+        result = await self._determine_eligibility(session)
+        
+        self.session_mgr.update_eligibility_state(
+            session_id,
+            {
+                "status": "determined",
+                "eligible": result.get("eligible"),
+                "confidence": result.get("confidence"),
+                "reason": result.get("reason"),
+            }
+        )
+        
+        return {
+            "status": "determined",
+            "eligible": result.get("eligible"),
+            "confidence": result.get("confidence"),
+            "reason": result.get("reason"),
+            "remaining_questions_estimate": 0
+        }
+
+    async def _determine_eligibility(self, session: Session) -> Dict:
         state = session.eligibility_state
         program_info = state.get("program_info", "")
         user_profile_str = self._format_user_profile(session)
         conversation_str = self._format_conversation(session)
 
-        logger.debug(
-            f"_generate_question called for session {session.session_id}. "
-            f"question_count={state.get('question_count', 0)}."
-        )
+        logger.debug(f"_determine_eligibility called for session {session.session_id}.")
 
         response = await self.llm.run_prompt_template(
-            prompt_file=_ELIGIBILITY_PROMPT,
+            prompt_file=_DETERMINE_PROMPT,
             variables={
                 "program_info": program_info,
                 "user_profile": user_profile_str,
@@ -316,97 +399,128 @@ class EligibilityEngine:
             response_format="json_object",
         )
 
-        # Graceful handling of LLM parse failures
         if "error" in response:
             logger.error(
-                f"_generate_question: LLM returned invalid JSON for session "
+                f"_determine_eligibility: LLM returned invalid JSON for session "
                 f"{session.session_id}. Raw: {response.get('raw', '')[:200]}"
             )
             return {
-                "status": "questioning",
-                "question": "죄송합니다. 질문을 생성하는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
-                "question_field": None,
-                "question_key": None,
-                "eligible": None,
+                "status": "determined",
+                "eligible": False,
                 "confidence": 0.0,
-                "reason": "LLM 응답 파싱 오류",
-                "remaining_questions_estimate": self.MAX_QUESTIONS - state.get("question_count", 0),
+                "reason": "최종 자격 판정 파싱 중 오류가 발생했습니다."
             }
+
+        response["status"] = "determined"
+        return self._normalize_eligibility_response(response)
+
+    @staticmethod
+    def _normalize_eligibility_response(response: Dict) -> Dict:
+        raw_eligible = response.get("eligible")
+        if isinstance(raw_eligible, str):
+            response["eligible"] = raw_eligible.lower() == "true"
+        elif raw_eligible is None:
+            response["eligible"] = None
+
+        raw_confidence = response.get("confidence")
+        if isinstance(raw_confidence, str):
+            try:
+                response["confidence"] = float(raw_confidence)
+            except ValueError:
+                response["confidence"] = 0.0
+        elif raw_confidence is None:
+            response["confidence"] = 0.0
+
+        if response.get("status") == "determined" and response["eligible"] is not None:
+            reason = response.get("reason", "")
+            negative_indicators = [
+                "충족하지 못", "충족하지 않", "해당하지 않", "해당되지 않",
+                "자격이 없", "자격 없", "대상이 아닌", "대상이 아님",
+                "불가능", "부적합", "미충족", "미달",
+            ]
+            positive_indicators = [
+                "충족합니다", "충족하는 것으로", "자격을 갖추",
+                "자격이 있", "자격 있", "해당합니다", "해당되는 것으로",
+                "대상입니다", "대상으로 확인",
+            ]
+
+            reason_suggests_ineligible = any(kw in reason for kw in negative_indicators)
+            reason_suggests_eligible = any(kw in reason for kw in positive_indicators)
+
+            if response["eligible"] is True and reason_suggests_ineligible and not reason_suggests_eligible:
+                logger.warning(
+                    f"Eligibility inconsistency detected: eligible=True but reason "
+                    f"suggests ineligible. Correcting to eligible=False. "
+                    f"Reason: {reason[:100]}"
+                )
+                response["eligible"] = False
+            elif response["eligible"] is False and reason_suggests_eligible and not reason_suggests_ineligible:
+                logger.warning(
+                    f"Eligibility inconsistency detected: eligible=False but reason "
+                    f"suggests eligible. Correcting to eligible=True. "
+                    f"Reason: {reason[:100]}"
+                )
+                response["eligible"] = True
 
         return response
 
-    async def _interpret_answer(self, session: Session, answer: str) -> Dict:
-        """
-        Description: Calls the follow-up LLM prompt to interpret the user's O/X
-            answer and extract any structured profile data embedded in it.
-        How it works: Retrieves the previous (current) question from
-            eligibility_state, then calls run_prompt_template with follow_up.yaml.
-            The LLM returns a JSON object with interpreted_answer ("yes"/"no"/"unclear"),
-            profile_update (dict), clarification_needed (bool), and optionally a
-            clarification_question string.  On JSON parse failure a safe fallback
-            requesting clarification is returned.
-        Returns: Dict with keys: interpreted_answer, profile_update,
-            clarification_needed, clarification_question.
-        Throws: Nothing — LLM errors are caught and returned as a fallback dict.
-        """
+    # ------------------------------------------------------------------
+    # Rule-based answer interpretation (no LLM call)
+    # ------------------------------------------------------------------
+
+    _YES_ANSWERS = {"예", "o"}
+    _NO_ANSWERS = {"아니오", "x"}
+
+    def _interpret_answer(self, session: Session, answer: str) -> Dict:
+        """O/X 답변만 처리. 프론트엔드에서 '예' 또는 '아니오'만 전송됩니다."""
         state = session.eligibility_state
-        program_info = state.get("program_info", "")
-        previous_question = state.get("current_question") or ""
-        user_profile_str = self._format_user_profile(session)
+        normalized = answer.strip().lower()
+        current_q_meta = state.get("current_question_meta", {})
+        field = current_q_meta.get("field", "custom")
+        key = current_q_meta.get("key")
 
-        logger.debug(
-            f"_interpret_answer called for session {session.session_id}. "
-            f"answer={answer!r}."
-        )
+        if normalized in self._YES_ANSWERS:
+            is_yes = True
+        elif normalized in self._NO_ANSWERS:
+            is_yes = False
+        else:
+            is_yes = True if normalized in {"네", "yes", "y", "ㅇ"} else False
 
-        response = await self.llm.run_prompt_template(
-            prompt_file=_FOLLOW_UP_PROMPT,
-            variables={
-                "program_info": program_info,
-                "user_profile": user_profile_str,
-                "previous_question": previous_question,
-                "user_answer": answer,
-            },
-            response_format="json_object",
-        )
+        profile_update = self._build_profile_update(field, key, is_yes)
 
-        # Graceful handling of LLM parse failures
-        if "error" in response:
-            logger.error(
-                f"_interpret_answer: LLM returned invalid JSON for session "
-                f"{session.session_id}. Raw: {response.get('raw', '')[:200]}"
-            )
-            return {
-                "interpreted_answer": "unclear",
-                "profile_update": {},
-                "clarification_needed": True,
-                "clarification_question": (
-                    "답변을 이해하지 못했습니다. '예' 또는 '아니오'로 답해 주시겠어요?"
-                ),
-            }
+        return {
+            "interpreted_answer": "yes" if is_yes else "no",
+            "profile_update": profile_update,
+            "clarification_needed": False,
+            "clarification_question": None,
+        }
 
-        return response
+    @staticmethod
+    def _build_profile_update(field: str, key: Optional[str], is_yes: bool) -> Dict:
+        """field 메타데이터와 O/X 결과를 기반으로 프로필 업데이트 딕셔너리를 생성합니다."""
+        update: Dict = {}
+
+        if field == "income_level":
+            update["income_level"] = "low" if is_yes else "medium"
+        elif field == "employment_status":
+            update["employment_status"] = "employed" if is_yes else "unemployed"
+        elif field == "disability_status":
+            update["disability_status"] = is_yes
+        elif field == "veteran_status":
+            update["veteran_status"] = is_yes
+        elif field == "custom" and key:
+            update[key] = is_yes
+
+        return update
 
     # ------------------------------------------------------------------
     # Formatting helpers
     # ------------------------------------------------------------------
 
     def _format_user_profile(self, session: Session) -> str:
-        """
-        Description: Converts the session's UserProfile into a concise, human-readable
-            Korean string suitable for injection into LLM prompts.
-        How it works: Iterates over all standard fields using _FIELD_LABELS for
-            Korean labels, then appends any custom_fields entries.  Fields whose
-            value is None are shown as "미확인" so the LLM understands that the
-            information has not yet been collected.
-        Returns: Multi-line string where each line has the format "- 라벨: 값\n".
-            Returns "- 수집된 정보 없음" if the profile has no data at all.
-        Throws: Nothing.
-        """
         profile_dict = session.user_profile.to_dict()
         lines = []
 
-        # Standard fields with Korean labels
         for field_key, label in _FIELD_LABELS.items():
             raw_value = profile_dict.get(field_key)
             if raw_value is None:
@@ -414,7 +528,6 @@ class EligibilityEngine:
             elif isinstance(raw_value, bool):
                 display_value = "예" if raw_value else "아니오"
             else:
-                # Append unit suffix for common numeric fields
                 if field_key == "age":
                     display_value = f"{raw_value}세"
                 elif field_key == "household_size":
@@ -423,7 +536,6 @@ class EligibilityEngine:
                     display_value = str(raw_value)
             lines.append(f"- {label}: {display_value}")
 
-        # Custom / extra fields (arbitrary keys from the LLM)
         custom = session.user_profile.custom_fields
         for key, value in custom.items():
             if value is None:
@@ -440,28 +552,14 @@ class EligibilityEngine:
         return "\n".join(lines)
 
     def _format_conversation(self, session: Session) -> str:
-        """
-        Description: Formats the last 10 messages of the session's conversation
-            history into a compact Q/A string for LLM context injection.
-        How it works: Slices the last 10 SessionMessage entries from the session's
-            messages list, skips system messages (which are internal housekeeping),
-            and formats assistant messages as "Q: ..." and user messages as "A: ...".
-            Adjacent Q/A pairs are separated by " / " on the same line when possible,
-            otherwise placed on separate lines.
-        Returns: A single string of Q/A pairs separated by newlines.
-            Returns "대화 내역 없음" if there are no user or assistant messages.
-        Throws: Nothing.
-        """
         recent = session.messages[-10:]
         parts = []
         pending_question: Optional[str] = None
 
         for msg in recent:
             if msg.role == "system":
-                # System messages are internal — omit from conversation context
                 continue
             elif msg.role == "assistant":
-                # Flush any unpaired question first
                 if pending_question is not None:
                     parts.append(f"Q: {pending_question}")
                 pending_question = msg.content
@@ -472,7 +570,6 @@ class EligibilityEngine:
                 else:
                     parts.append(f"A: {msg.content}")
 
-        # Flush any trailing question that has not been answered yet
         if pending_question is not None:
             parts.append(f"Q: {pending_question}")
 
@@ -487,15 +584,6 @@ _eligibility_engine_instance: Optional[EligibilityEngine] = None
 
 
 def get_eligibility_engine() -> EligibilityEngine:
-    """
-    Description: Returns the application-wide singleton EligibilityEngine instance.
-    How it works: Lazily instantiates EligibilityEngine on first call and caches
-        it in a module-level variable.  Subsequent calls return the cached instance
-        so that the underlying LLM client and session manager singletons are shared
-        without re-initialization overhead.
-    Returns: The singleton EligibilityEngine instance.
-    Throws: Nothing.
-    """
     global _eligibility_engine_instance
     if _eligibility_engine_instance is None:
         _eligibility_engine_instance = EligibilityEngine()

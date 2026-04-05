@@ -1,12 +1,21 @@
 import React, { useState } from 'react';
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+
+function getReliability(refCount) {
+    if (refCount >= 3) return { label: '신뢰도 높음', color: 'bg-green-100 text-green-700 border-green-300' };
+    if (refCount === 2) return { label: '신뢰도 중간', color: 'bg-yellow-100 text-yellow-700 border-yellow-300' };
+    return { label: '신뢰도 낮음', color: 'bg-red-100 text-red-700 border-red-300' };
+}
 
 export default function ResultDisplay({ result, references = [], label = "답변", isFirst = true }) {
     const [copied, setCopied] = useState(false);
     const [showDisclaimer, setShowDisclaimer] = useState(false);
 
     if (!result) return null;
+
+    const reliability = getReliability(references.length);
 
     const handleCopy = async () => {
         try {
@@ -21,24 +30,32 @@ export default function ResultDisplay({ result, references = [], label = "답변
 
     return (
         <div className={`bg-white rounded-lg shadow-md p-6 ${!isFirst ? 'border-l-4 border-blue-500' : ''}`}>
-            <div className="flex items-center gap-2 mb-4">
-                <span className={`px-2 py-1 text-xs font-medium rounded ${
-                    isFirst ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-700'
-                }`}>
-                    {label}
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                    <span className={`px-2 py-1 text-xs font-medium rounded ${
+                        isFirst ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-700'
+                    }`}>
+                        {label}
+                    </span>
+                    <span className={`px-2 py-1 text-xs font-medium rounded border ${reliability.color}`}>
+                        {reliability.label}
+                    </span>
+                </div>
+                <span className="text-xs text-gray-500">
+                    참조 문서 {references.length}건
                 </span>
-                <h2 className="text-xl font-semibold text-gray-800">
-                    {
-                        isFirst ? '내용을 정리했어요!' : '내용을 더 쉽게 정리했어요!'
-                    }
-                </h2>
             </div>
             <div
                 className="bg-blue-50 rounded-lg p-4 border border-blue-200 cursor-pointer select-none mb-3"
                 onClick={() => setShowDisclaimer(!showDisclaimer)}
             >
                 <div className="flex items-center justify-between text-blue-700">
-                    <span>AI 요약본입니다. 정확한 내용은 질문과 링크를 확인하세요.</span>
+                    <span>
+                        {references.length >= 3
+                            ? 'AI 요약본입니다. 정확한 내용은 원문과 링크를 확인하세요.'
+                            : '관련 공식 문서가 충분하지 않습니다. 원문 공고를 직접 확인해 주세요.'
+                        }
+                    </span>
                     <span className={`transform transition-transform ${showDisclaimer ? 'rotate-180' : ''}`}>
                         ▼
                     </span>
@@ -53,8 +70,17 @@ export default function ResultDisplay({ result, references = [], label = "답변
                     </ul>
                 )}
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <ReactMarkdown>
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 prose prose-sm prose-slate max-w-none
+                            prose-headings:text-slate-800 prose-headings:font-bold prose-headings:mt-4 prose-headings:mb-2
+                            prose-p:text-slate-700 prose-p:leading-relaxed prose-p:my-1.5
+                            prose-strong:text-slate-900 prose-strong:font-semibold
+                            prose-ul:my-2 prose-ul:pl-5 prose-ol:my-2 prose-ol:pl-5
+                            prose-li:my-0.5 prose-li:text-slate-700
+                            prose-table:border-collapse prose-th:bg-slate-100 prose-th:border prose-th:border-slate-300 prose-th:px-3 prose-th:py-1.5 prose-th:text-left
+                            prose-td:border prose-td:border-slate-200 prose-td:px-3 prose-td:py-1.5
+                            prose-blockquote:border-l-4 prose-blockquote:border-blue-300 prose-blockquote:bg-blue-50 prose-blockquote:pl-4 prose-blockquote:py-2 prose-blockquote:italic
+                            prose-hr:my-4 prose-hr:border-slate-200">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {result}
                 </ReactMarkdown>
             </div>

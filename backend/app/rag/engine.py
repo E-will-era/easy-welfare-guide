@@ -446,6 +446,11 @@ class WelfareRAG:
         # 6. Parent Document Retrieval
         results = []
         for item in final_candidates[:top_k]:
+            rerank_score = item.get('rerank_score', item.get('score', 0))
+            if 'rerank_score' in item and rerank_score < 1.0:
+                logger.info(f"RAG Filter: Rerank score ({rerank_score:.2f}) is below threshold, skipping irrelevant document.")
+                continue
+                
             metadata = item['metadata']
             doc_id = item['id']
             parent_id = metadata.get('parent_id')
