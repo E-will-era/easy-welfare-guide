@@ -141,7 +141,7 @@ def _download_from_huggingface(repo_id: str, vectordb_dir: Path, use_raw_files: 
             # 임베딩 함수 설정
             device = "cuda" if torch.cuda.is_available() else "cpu"
             embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="BAAI/bge-base-en-v1.5",
+                model_name="BAAI/bge-m3",
                 device=device,
                 normalize_embeddings=True
             )
