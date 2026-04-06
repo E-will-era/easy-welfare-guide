@@ -339,7 +339,36 @@ class WelfareRAG:
             logger.warning(f"Reranker 로드 실패: {e}")
             self.reranker = None
             
+        # ---------------------------------------------------------
+        # 6. BM25용 전체 문서 ID 캐시
+        # ---------------------------------------------------------
+        try:
+            self._all_doc_ids = self.collection.get()['ids']
+            logger.info(f"✅ 문서 ID 캐시 완료 ({len(self._all_doc_ids)}개)")
+        except Exception as e:
+            logger.error(f"❌ 문서 ID 캐시 실패: {e}")
+            self._all_doc_ids = []
+
         logger.info("="*50)
+
+    def _batch_get(self, ids: List[str], batch_size: int = 500) -> Dict:
+        """ChromaDB get()을 배치로 나눠서 SQL 변수 제한 회피"""
+        all_ids = []
+        all_documents = []
+        all_metadatas = []
+
+        for i in range(0, len(ids), batch_size):
+            batch_ids = ids[i:i + batch_size]
+            resp = self.collection.get(ids=batch_ids)
+            all_ids.extend(resp['ids'])
+            all_documents.extend(resp['documents'])
+            all_metadatas.extend(resp['metadatas'])
+
+        return {
+            'ids': all_ids,
+            'documents': all_documents,
+            'metadatas': all_metadatas
+        }
 
     def _tokenize(self, text: str) -> List[str]:
         """BM25 검색용 토크나이저"""
@@ -384,12 +413,9 @@ class WelfareRAG:
                     max_score = scores[top_indices[0]]
                     if max_score <= 0: max_score = 1.0
                     
-                    # 안전하게 DB ID 가져오기
-                    all_ids = self.collection.get()['ids']
-                    
                     for idx in top_indices:
-                        if idx < len(all_ids):
-                            doc_id = all_ids[idx]
+                        if idx < len(self._all_doc_ids):
+                            doc_id = self._all_doc_ids[idx]
                             bm25_scores[doc_id] = scores[idx] / max_score
             except Exception as e:
                 logger.error(f"BM25 검색 중 오류: {e}")
@@ -416,7 +442,7 @@ class WelfareRAG:
         if not candidate_ids:
             return []
 
-        docs_resp = self.collection.get(ids=candidate_ids)
+        docs_resp = self._batch_get(candidate_ids)
         
         id_to_text = {}
         id_to_meta = {}
