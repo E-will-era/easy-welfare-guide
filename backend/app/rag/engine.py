@@ -343,7 +343,12 @@ class WelfareRAG:
         # 6. BM25용 전체 문서 ID 캐시
         # ---------------------------------------------------------
         try:
-            self._all_doc_ids = self.collection.get()['ids']
+            total = self.collection.count()
+            self._all_doc_ids = []
+            batch_size = 500
+            for offset in range(0, total, batch_size):
+                batch = self.collection.get(limit=batch_size, offset=offset)
+                self._all_doc_ids.extend(batch['ids'])
             logger.info(f"✅ 문서 ID 캐시 완료 ({len(self._all_doc_ids)}개)")
         except Exception as e:
             logger.error(f"❌ 문서 ID 캐시 실패: {e}")
