@@ -323,18 +323,40 @@ class EligibilityEngine:
     # MCP helpers
     # ------------------------------------------------------------------
 
-    async def _enrich_with_mcp(self, program_info: str) -> str:
-        # Markdown 제거: 헤더, 볼드, 이탤릭, 리스트 마커 등 제거하여 검색에 최적화
-        clean_name = re.sub(r'#+\s*', '', program_info)
-        clean_name = re.sub(r'\*\*|__|\*|_', '', clean_name)
-        clean_name = re.sub(r'^[\s\-*+]+', '', clean_name, flags=re.MULTILINE)
-        
-        # 첫 번째 유의미한 줄 추출
-        lines = [L.strip() for L in clean_name.split('\n') if L.strip()]
+    @staticmethod
+    def _extract_program_name(program_info: str) -> str:
+        """admin_summary에서 실제 프로그램 이름을 추출합니다."""
+        # 1순위: "핵심 지식 키워드" 섹션에서 첫 번째 키워드 추출
+        # 예: 2. **핵심 지식 키워드:** [경기도 청년 복지포인트, ...]
+        keyword_match = re.search(
+            r'핵심\s*지식\s*키워드[:\s]*\[([^\]]+)\]', program_info
+        )
+        if keyword_match:
+            first_keyword = keyword_match.group(1).split(',')[0].strip()
+            if len(first_keyword) >= 3:
+                return first_keyword[:80]
+
+        # 2순위: ###으로 시작하는 용어 정의의 첫 번째 항목
+        # 예: - ###경기도 청년 복지포인트: 설명...
+        term_match = re.search(r'###\s*([^:\n]+)', program_info)
+        if term_match:
+            term = term_match.group(1).strip()
+            if len(term) >= 3:
+                return term[:80]
+
+        # 3순위: 마크다운/메타데이터를 제거하고 첫 의미 있는 줄 사용
+        clean = re.sub(r'\d+\.\s*\*{0,2}유효성\*{0,2}[:\s]*\[.*?\].*', '', program_info)
+        clean = re.sub(r'#+\s*', '', clean)
+        clean = re.sub(r'\*\*|__|\*|_', '', clean)
+        clean = re.sub(r'^[\s\-*+]+', '', clean, flags=re.MULTILINE)
+        lines = [L.strip() for L in clean.split('\n') if L.strip() and len(L.strip()) >= 3]
         if lines:
-            program_name = lines[0][:80].strip()
-        else:
-            program_name = clean_name[:80].strip()
+            return lines[0][:80]
+
+        return program_info[:80].strip()
+
+    async def _enrich_with_mcp(self, program_info: str) -> str:
+        program_name = self._extract_program_name(program_info)
 
         logger.info(f"_enrich_with_mcp: searching eligibility for '{program_name}'")
 

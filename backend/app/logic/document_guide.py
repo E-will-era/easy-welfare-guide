@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 from app.agents.llm_handler import get_llm_handler
 from app.mcp.search_client import get_mcp_client
 from app.core.logger import logger
+from app.logic.eligibility import EligibilityEngine
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +237,8 @@ class DocumentGuideEngine:
             3. 원문 조각을 사람이 읽을 수 있는 다중 행 문자열로 포맷팅하여 LLM이 스스로 서류를 추출하게 돕습니다.
         반환값: MCP 검색 결과의 포맷팅된 문자열; 실패 시 "검색 결과 없음" 반환.
         """
-        query = program_info[:80].strip() + " 신청서류 구비서류"
+        program_name = EligibilityEngine._extract_program_name(program_info)
+        query = program_name + " 신청서류 구비서류"
         logger.info(
             f"DocumentGuideEngine._search_documents: querying MCP with '{query}'"
         )
