@@ -37,6 +37,7 @@ class LLMHandler:
         )
         self.prompt_loader = PromptLoader()
         self._last_call_time = 0.0
+        self._call_lock = asyncio.Lock()  # 동시 요청 직렬화
 
     async def run_prompt_template(
         self,
@@ -58,14 +59,6 @@ class LLMHandler:
         # 예외:
         #   ValueError: image_url이 제공된 경우(비전은 지원되지 않음).
         #   json.JSONDecodeError: 내부적으로 캡처됨; {"error": ..., "raw": ...} 형식으로 반환합니다.
-
-        # 0. Rate limit 방지를 위한 호출 간격 조절
-        now = time.monotonic()
-        elapsed = now - self._last_call_time
-        if elapsed < _MIN_CALL_INTERVAL:
-            wait = _MIN_CALL_INTERVAL - elapsed
-            logger.debug(f"Rate limit guard: waiting {wait:.1f}s before next LLM call")
-            await asyncio.sleep(wait)
 
         # 1. 비전 호출 거부 — EXAONE은 이미지 입력을 지원하지 않음
         if image_url:
@@ -129,31 +122,41 @@ class LLMHandler:
         if response_format == "json_object":
             kwargs["response_format"] = {"type": "json_object"}
             
+        # Lock으로 동시 요청 직렬화 + 호출 간격 보장
         full_content = ""
-        for attempt in range(_MAX_RETRIES):
-            try:
-                response = await self.client.chat.completions.create(**kwargs)
-                async for chunk in response:
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
-                    # reasoning_content (사고 과정)은 무시하고 실제 응답인 content만 수집
-                    if delta.content is not None:
-                        full_content += delta.content
-                self._last_call_time = time.monotonic()
-                break  # 성공 시 재시도 루프 탈출
-            except RateLimitError as e:
-                if attempt < _MAX_RETRIES - 1:
-                    backoff = _BASE_BACKOFF * (2 ** attempt)
-                    logger.warning(
-                        f"Rate limit hit (attempt {attempt + 1}/{_MAX_RETRIES}). "
-                        f"Retrying in {backoff}s..."
-                    )
-                    await asyncio.sleep(backoff)
-                    full_content = ""  # 이전 부분 응답 초기화
-                else:
-                    logger.error(f"Rate limit exceeded after {_MAX_RETRIES} retries.")
-                    raise
+        async with self._call_lock:
+            # 간격 조절은 lock 안에서 — 다른 요청과 경쟁하지 않음
+            now = time.monotonic()
+            elapsed = now - self._last_call_time
+            if elapsed < _MIN_CALL_INTERVAL:
+                wait = _MIN_CALL_INTERVAL - elapsed
+                logger.debug(f"Rate limit guard: waiting {wait:.1f}s before next LLM call")
+                await asyncio.sleep(wait)
+
+            for attempt in range(_MAX_RETRIES):
+                try:
+                    response = await self.client.chat.completions.create(**kwargs)
+                    async for chunk in response:
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta
+                        # reasoning_content (사고 과정)은 무시하고 실제 응답인 content만 수집
+                        if delta.content is not None:
+                            full_content += delta.content
+                    self._last_call_time = time.monotonic()
+                    break  # 성공 시 재시도 루프 탈출
+                except RateLimitError as e:
+                    if attempt < _MAX_RETRIES - 1:
+                        backoff = _BASE_BACKOFF * (2 ** attempt)
+                        logger.warning(
+                            f"Rate limit hit (attempt {attempt + 1}/{_MAX_RETRIES}). "
+                            f"Retrying in {backoff}s..."
+                        )
+                        await asyncio.sleep(backoff)
+                        full_content = ""  # 이전 부분 응답 초기화
+                    else:
+                        logger.error(f"Rate limit exceeded after {_MAX_RETRIES} retries.")
+                        raise
 
         if not full_content:
             if response_format == "json_object":
