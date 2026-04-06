@@ -122,19 +122,19 @@ class LLMHandler:
         if response_format == "json_object":
             kwargs["response_format"] = {"type": "json_object"}
             
-        # Lock으로 동시 요청 직렬화 + 호출 간격 보장
+        # Lock은 API 호출 시에만 잡고, 재시도 대기는 lock 밖에서 수행
         full_content = ""
-        async with self._call_lock:
-            # 간격 조절은 lock 안에서 — 다른 요청과 경쟁하지 않음
-            now = time.monotonic()
-            elapsed = now - self._last_call_time
-            if elapsed < _MIN_CALL_INTERVAL:
-                wait = _MIN_CALL_INTERVAL - elapsed
-                logger.debug(f"Rate limit guard: waiting {wait:.1f}s before next LLM call")
-                await asyncio.sleep(wait)
+        for attempt in range(_MAX_RETRIES):
+            try:
+                async with self._call_lock:
+                    # 간격 조절은 lock 안에서 — 다른 요청과 경쟁하지 않음
+                    now = time.monotonic()
+                    elapsed = now - self._last_call_time
+                    if elapsed < _MIN_CALL_INTERVAL:
+                        wait = _MIN_CALL_INTERVAL - elapsed
+                        logger.debug(f"Rate limit guard: waiting {wait:.1f}s before next LLM call")
+                        await asyncio.sleep(wait)
 
-            for attempt in range(_MAX_RETRIES):
-                try:
                     response = await self.client.chat.completions.create(**kwargs)
                     async for chunk in response:
                         if not chunk.choices:
@@ -144,19 +144,20 @@ class LLMHandler:
                         if delta.content is not None:
                             full_content += delta.content
                     self._last_call_time = time.monotonic()
-                    break  # 성공 시 재시도 루프 탈출
-                except RateLimitError as e:
-                    if attempt < _MAX_RETRIES - 1:
-                        backoff = _BASE_BACKOFF * (2 ** attempt)
-                        logger.warning(
-                            f"Rate limit hit (attempt {attempt + 1}/{_MAX_RETRIES}). "
-                            f"Retrying in {backoff}s..."
-                        )
-                        await asyncio.sleep(backoff)
-                        full_content = ""  # 이전 부분 응답 초기화
-                    else:
-                        logger.error(f"Rate limit exceeded after {_MAX_RETRIES} retries.")
-                        raise
+                break  # 성공 시 재시도 루프 탈출 (lock 밖)
+            except RateLimitError:
+                # lock이 이미 해제된 상태에서 대기
+                if attempt < _MAX_RETRIES - 1:
+                    backoff = _BASE_BACKOFF * (2 ** attempt)
+                    logger.warning(
+                        f"Rate limit hit (attempt {attempt + 1}/{_MAX_RETRIES}). "
+                        f"Retrying in {backoff}s..."
+                    )
+                    await asyncio.sleep(backoff)
+                    full_content = ""  # 이전 부분 응답 초기화
+                else:
+                    logger.error(f"Rate limit exceeded after {_MAX_RETRIES} retries.")
+                    raise
 
         if not full_content:
             if response_format == "json_object":
