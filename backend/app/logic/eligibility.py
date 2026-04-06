@@ -221,13 +221,15 @@ class EligibilityEngine:
     @staticmethod
     def _check_program_expired(program_info: str) -> Optional[str]:
         today = date.today()
-        
-        # 년도 기준 만료 패턴 (2024년 기준 등)
         current_year = today.year
-        past_year_pattern = re.compile(rf'(20[0-2][0-4])년\s*기준', re.UNICODE)
+
+        # 년도 기준 만료 패턴 (과거 연도 + "기준")
+        past_year_pattern = re.compile(r'(20\d{2})년\s*기준', re.UNICODE)
         match = past_year_pattern.search(program_info)
         if match:
-            return f"과거({match.group(1)}년) 기준의 프로그램으로 현재는 신청 기간이 만료되었습니다."
+            year = int(match.group(1))
+            if year < current_year:
+                return f"과거({year}년) 기준의 프로그램으로 현재는 신청 기간이 만료되었습니다."
 
         # 명시적 만료 텍스트 패턴
         text_patterns = [
@@ -238,9 +240,12 @@ class EligibilityEngine:
             if p in program_info:
                 return "신청 기한이 종료된 프로그램입니다."
 
-        date_pattern = r'(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})[일]?'
+        # 연월일 패턴 (4자리 연도 필수)
+        full_date_pattern = r'(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})[일.]?'
+        # 연도 없는 월일 패턴 (시작 날짜에서 연도를 상속)
+        short_date_pattern = r'(\d{1,2})[.\-/월]\s*(\d{1,2})[일.]?'
 
-        def parse_date(m, g_offset=1):
+        def parse_full_date(m, g_offset=1):
             try:
                 y = int(m.group(g_offset))
                 mo = int(m.group(g_offset + 1))
@@ -249,36 +254,66 @@ class EligibilityEngine:
             except (ValueError, OverflowError):
                 return None
 
-        range_pattern = re.compile(
+        # 범위 패턴 1: 시작/끝 모두 연도 있는 경우
+        range_full = re.compile(
             r'(?:신청기한|접수기간|모집기간|신청기간|사업기간)?'
             r'[^0-9]{0,15}'
-            + date_pattern
-            + r'\s*[~∼\-]\s*'
-            + date_pattern,
+            + full_date_pattern
+            + r'[\s.:]*(?:\d{1,2}:\d{2})?\s*[~∼\-]\s*'
+            + full_date_pattern,
             re.UNICODE,
         )
-        for match in range_pattern.finditer(program_info):
-            end_date = parse_date(match, g_offset=4)
+        for m in range_full.finditer(program_info):
+            end_date = parse_full_date(m, g_offset=4)
             if end_date and end_date < today:
                 return f"신청 기한이 종료된 프로그램입니다. (마감일: {end_date.year}년 {end_date.month}월 {end_date.day}일)"
 
+        # 범위 패턴 2: 시작에만 연도, 끝은 월.일만 있는 경우
+        # 예: 2024. 6. 1. 00:00 ~ 6. 11. 18:00
+        range_short_end = re.compile(
+            r'(?:신청기한|접수기간|모집기간|신청기간|사업기간)?'
+            r'[^0-9]{0,15}'
+            + full_date_pattern
+            + r'[\s.:]*(?:\d{1,2}:\d{2})?\s*[~∼\-]\s*'
+            + short_date_pattern,
+            re.UNICODE,
+        )
+        for m in range_short_end.finditer(program_info):
+            start_date = parse_full_date(m, g_offset=1)
+            if not start_date:
+                continue
+            try:
+                end_month = int(m.group(4))
+                end_day = int(m.group(5))
+                # 끝 월이 시작 월보다 작으면 다음 해로 추정
+                end_year = start_date.year
+                if end_month < start_date.month:
+                    end_year += 1
+                end_date = date(end_year, end_month, end_day)
+                if end_date < today:
+                    return f"신청 기한이 종료된 프로그램입니다. (마감일: {end_date.year}년 {end_date.month}월 {end_date.day}일)"
+            except (ValueError, OverflowError):
+                continue
+
+        # 마감/종료 + 날짜 패턴
         deadline_pattern = re.compile(
             r'(?:마감|종료|까지|신청기한|접수마감)'
             r'[^0-9]{0,20}'
-            + date_pattern,
+            + full_date_pattern,
             re.UNICODE,
         )
-        for match in deadline_pattern.finditer(program_info):
-            d = parse_date(match)
+        for m in deadline_pattern.finditer(program_info):
+            d = parse_full_date(m)
             if d and d < today:
                 return f"신청 기한이 종료된 프로그램입니다. (마감일: {d.year}년 {d.month}월 {d.day}일)"
 
+        # 날짜 + 마감/종료 패턴
         reverse_pattern = re.compile(
-            date_pattern + r'[^0-9]{0,10}(?:마감|종료|까지)',
+            full_date_pattern + r'[^0-9]{0,10}(?:마감|종료|까지)',
             re.UNICODE,
         )
-        for match in reverse_pattern.finditer(program_info):
-            d = parse_date(match)
+        for m in reverse_pattern.finditer(program_info):
+            d = parse_full_date(m)
             if d and d < today:
                 return f"신청 기한이 종료된 프로그램입니다. (마감일: {d.year}년 {d.month}월 {d.day}일)"
 
