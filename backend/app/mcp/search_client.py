@@ -10,6 +10,7 @@ import asyncio
 import re
 import urllib.parse
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Dict, List, Optional
 
 import httpx
@@ -629,28 +630,43 @@ class MCPSearchClient:
         self, results: List[SearchResult], query: str
     ) -> List[SearchResult]:
         """
-        Description: Assigns a relevance_score to each SearchResult based on
-            keyword overlap between the query and the result title/snippet.
-        How it works:
-            1. Extracts keywords from the query.
-            2. For each result, counts query keywords present in the combined
-               title+snippet text (case-insensitive).
-            3. Divides the hit count by the total keyword count to get a score
-               in [0.0, 1.0].
-            4. Mutates relevance_score in place on each SearchResult.
-        Returns: The same list of SearchResult objects with scores assigned.
-        Throws: Never raises.
+        키워드 연관도 + 날짜 최신성을 결합하여 점수를 매기고,
+        과거 연도 자료는 필터링합니다.
         """
+        current_year = date.today().year
         keywords = self._extract_keywords(query)
-        if not keywords:
-            return results
 
+        scored: List[SearchResult] = []
         for result in results:
-            combined = f"{result.title} {result.snippet}".lower()
-            hits = sum(1 for kw in keywords if kw.lower() in combined)
-            result.relevance_score = round(hits / len(keywords), 4)
+            combined = f"{result.title} {result.snippet}"
 
-        return results
+            # 과거 연도 자료 필터링 (2년 이상 된 자료 제외)
+            years = re.findall(r'(20\d{2})년', combined)
+            if years:
+                max_year = max(int(y) for y in years)
+                if max_year < current_year - 1:
+                    logger.debug(
+                        f"MCPSearchClient._score_results: filtering old result "
+                        f"({max_year}년): {result.title[:50]}"
+                    )
+                    continue
+                # 최신 연도 보너스: 올해 → +0.3, 작년 → +0.15
+                recency_bonus = 0.3 if max_year >= current_year else 0.15
+            else:
+                # 연도 없으면 최신으로 간주
+                recency_bonus = 0.1
+
+            # 키워드 연관도
+            if keywords:
+                hits = sum(1 for kw in keywords if kw.lower() in combined.lower())
+                keyword_score = hits / len(keywords)
+            else:
+                keyword_score = 0.0
+
+            result.relevance_score = round(keyword_score + recency_bonus, 4)
+            scored.append(result)
+
+        return scored
 
 
 # ---------------------------------------------------------------------------
