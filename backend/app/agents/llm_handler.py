@@ -10,11 +10,11 @@ from app.agents.human import PromptLoader
 logger = logging.getLogger(__name__)
 
 # 429 Rate Limit 재시도 설정
-_MAX_RETRIES = 4
-_BASE_BACKOFF = 3.0  # 초 단위 (3s → 6s → 12s → 24s 지수 백오프)
+_MAX_RETRIES = 6
+_BASE_BACKOFF = 5.0  # 초 단위 (5s → 10s → 20s → 40s → 80s → 160s 지수 백오프)
 
 # 연속 호출 간 최소 간격 (초)
-_MIN_CALL_INTERVAL = 2.0
+_MIN_CALL_INTERVAL = 5.0
 
 
 class LLMHandler:
