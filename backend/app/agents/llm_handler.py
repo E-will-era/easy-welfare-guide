@@ -13,8 +13,11 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES = 6
 _BASE_BACKOFF = 5.0  # 초 단위 (5s → 10s → 20s → 40s → 80s → 160s 지수 백오프)
 
-# 연속 호출 간 최소 간격 (초)
-_MIN_CALL_INTERVAL = 5.0
+# 연속 호출 간 최소 간격 (초) — Lock이 직렬화하므로 짧게 유지
+_MIN_CALL_INTERVAL = 2.0
+
+# Lock 획득 대기 최대 시간 (초) — API 행 시 다른 요청 블로킹 방지
+_LOCK_TIMEOUT = 180.0
 
 
 class LLMHandler:
@@ -126,7 +129,23 @@ class LLMHandler:
         full_content = ""
         for attempt in range(_MAX_RETRIES):
             try:
-                async with self._call_lock:
+                # Lock 획득에 타임아웃 — 다른 호출이 행 걸려도 무한 대기 방지
+                try:
+                    await asyncio.wait_for(self._call_lock.acquire(), timeout=_LOCK_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.error(f"Lock acquisition timed out after {_LOCK_TIMEOUT}s. Proceeding without lock.")
+                    # Lock 없이 진행 (행 걸린 호출이 lock을 잡고 있는 상황)
+                    response = await self.client.chat.completions.create(**kwargs)
+                    async for chunk in response:
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta
+                        if delta.content is not None:
+                            full_content += delta.content
+                    self._last_call_time = time.monotonic()
+                    break
+
+                try:
                     # 간격 조절은 lock 안에서 — 다른 요청과 경쟁하지 않음
                     now = time.monotonic()
                     elapsed = now - self._last_call_time
@@ -144,6 +163,8 @@ class LLMHandler:
                         if delta.content is not None:
                             full_content += delta.content
                     self._last_call_time = time.monotonic()
+                finally:
+                    self._call_lock.release()
                 break  # 성공 시 재시도 루프 탈출 (lock 밖)
             except RateLimitError:
                 # lock이 이미 해제된 상태에서 대기
