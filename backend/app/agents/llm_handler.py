@@ -129,45 +129,40 @@ class LLMHandler:
         full_content = ""
         for attempt in range(_MAX_RETRIES):
             try:
-                # Lock 획득에 타임아웃 — 다른 호출이 행 걸려도 무한 대기 방지
+                # Lock 획득 (타임아웃 포함)
+                lock_acquired = True
                 try:
                     await asyncio.wait_for(self._call_lock.acquire(), timeout=_LOCK_TIMEOUT)
                 except asyncio.TimeoutError:
-                    logger.error(f"Lock acquisition timed out after {_LOCK_TIMEOUT}s. Proceeding without lock.")
-                    # Lock 없이 진행 (행 걸린 호출이 lock을 잡고 있는 상황)
-                    response = await self.client.chat.completions.create(**kwargs)
-                    async for chunk in response:
-                        if not chunk.choices:
-                            continue
-                        delta = chunk.choices[0].delta
-                        if delta.content is not None:
-                            full_content += delta.content
-                    self._last_call_time = time.monotonic()
-                    break
+                    lock_acquired = False
+                    logger.error(f"Lock timeout ({_LOCK_TIMEOUT}s). Proceeding without lock.")
 
                 try:
-                    # 간격 조절은 lock 안에서 — 다른 요청과 경쟁하지 않음
-                    now = time.monotonic()
-                    elapsed = now - self._last_call_time
-                    if elapsed < _MIN_CALL_INTERVAL:
-                        wait = _MIN_CALL_INTERVAL - elapsed
-                        logger.debug(f"Rate limit guard: waiting {wait:.1f}s before next LLM call")
-                        await asyncio.sleep(wait)
+                    # 간격 조절 (lock 있을 때만)
+                    if lock_acquired:
+                        now = time.monotonic()
+                        elapsed = now - self._last_call_time
+                        if elapsed < _MIN_CALL_INTERVAL:
+                            wait = _MIN_CALL_INTERVAL - elapsed
+                            logger.debug(f"Rate limit guard: waiting {wait:.1f}s")
+                            await asyncio.sleep(wait)
+
+                    logger.info(f"LLM call start: {prompt_file} (attempt {attempt + 1}/{_MAX_RETRIES})")
 
                     response = await self.client.chat.completions.create(**kwargs)
                     async for chunk in response:
                         if not chunk.choices:
                             continue
                         delta = chunk.choices[0].delta
-                        # reasoning_content (사고 과정)은 무시하고 실제 응답인 content만 수집
                         if delta.content is not None:
                             full_content += delta.content
                     self._last_call_time = time.monotonic()
                 finally:
-                    self._call_lock.release()
-                break  # 성공 시 재시도 루프 탈출 (lock 밖)
+                    if lock_acquired:
+                        self._call_lock.release()
+                break  # 성공
+
             except RateLimitError:
-                # lock이 이미 해제된 상태에서 대기
                 if attempt < _MAX_RETRIES - 1:
                     backoff = _BASE_BACKOFF * (2 ** attempt)
                     logger.warning(
@@ -175,9 +170,23 @@ class LLMHandler:
                         f"Retrying in {backoff}s..."
                     )
                     await asyncio.sleep(backoff)
-                    full_content = ""  # 이전 부분 응답 초기화
+                    full_content = ""
                 else:
                     logger.error(f"Rate limit exceeded after {_MAX_RETRIES} retries.")
+                    raise
+
+            except Exception as e:
+                # Timeout, ConnectionError 등 모든 에러 재시도
+                if attempt < _MAX_RETRIES - 1:
+                    backoff = _BASE_BACKOFF * (2 ** attempt)
+                    logger.warning(
+                        f"LLM call error: {type(e).__name__}: {e} "
+                        f"(attempt {attempt + 1}/{_MAX_RETRIES}). Retrying in {backoff}s..."
+                    )
+                    await asyncio.sleep(backoff)
+                    full_content = ""
+                else:
+                    logger.error(f"LLM call failed after {_MAX_RETRIES} retries: {e}")
                     raise
 
         if not full_content:
