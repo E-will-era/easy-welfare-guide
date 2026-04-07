@@ -138,10 +138,10 @@ def _download_from_huggingface(repo_id: str, vectordb_dir: Path, use_raw_files: 
             except:
                 pass
 
-            # 임베딩 함수 설정
+            # 임베딩 함수 설정 (다국어 모델 — 한국어 문서 지원)
             device = "cuda" if torch.cuda.is_available() else "cpu"
             embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="BAAI/bge-large-en-v1.5",
+                model_name="BAAI/bge-m3",
                 device=device,
                 normalize_embeddings=True
             )
@@ -160,10 +160,10 @@ def _download_from_huggingface(repo_id: str, vectordb_dir: Path, use_raw_files: 
             for i in range(0, total, batch_size):
                 batch = dataset[i:i + batch_size]
 
+                # embeddings 생략 → bge-m3가 documents로부터 자동 재임베딩
                 collection.add(
                     ids=batch["id"],
                     documents=batch["document"],
-                    embeddings=batch["embedding"],
                     metadatas=[json.loads(m) for m in batch["metadata"]]
                 )
 
@@ -258,9 +258,9 @@ class WelfareRAG:
         # GPU 확인
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        # 임베딩 함수 설정 (DB 생성 시 사용한 모델과 동일해야 함)
+        # 임베딩 함수 설정 (다국어 모델 — 한국어 문서 지원)
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="BAAI/bge-large-en-v1.5",
+            model_name="BAAI/bge-m3",
             device=device,
             normalize_embeddings=True
         )

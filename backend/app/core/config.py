@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     HF_TOKEN: str = ""
     HF_DATASET_REPO_ID: Optional[str] = None
     USE_HF_DATASET: bool = False
-    HF_USE_RAW_FILES: bool = True
+    HF_USE_RAW_FILES: bool = False  # parquet → bge-m3 재임베딩 사용
 
     class Config:
         env_file = ".env"

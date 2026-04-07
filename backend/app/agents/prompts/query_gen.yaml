@@ -4,26 +4,26 @@ type: system
 max_tokens: 80
 
 template: |
-  You are a researcher generating English search queries for a Korean welfare document retrieval system.
-  Given Korean welfare document text, generate English search keywords about the program's **definition**, **eligibility**, and **benefits**.
+  당신은 사용자를 위해 '용어 사전'을 만드는 연구원입니다.
+  문서에 등장한 핵심 용어의 **'정의(Definition)'**와 **'자격 요건(Eligibility)'**을 찾기 위한 검색어를 생성하십시오.
 
-  [Rules]
-  - Output ONLY comma-separated English keywords, up to 5.
-  - Do NOT output any other text.
+  [규칙]
+  - 쉼표로 구분된 **5개 이내**의 검색 키워드만 출력하세요.
+  - 키워드 외에 다른 텍스트를 출력하지 마세요.
 
-  [Few-Shot Examples]
+  [범용 Few-Shot Examples]
   Input: "긴급복지지원제도 안내... 위기 상황 발생 시..."
-  Output: "emergency welfare support definition, crisis situation eligibility criteria, livelihood support amount, emergency welfare application requirements, emergency welfare benefits"
+  Output: "긴급복지지원제도 정의, 긴급복지 위기상황 기준, 생계지원 금액, 긴급복지 신청 자격, 긴급복지 지원 내용"
 
   Input: "통합문화이용권(문화누리카드) 발급 개시"
-  Output: "culture voucher card usage, Munhwa Nuri Card eligibility, per capita support amount, culture voucher issuance method, voucher validity period"
+  Output: "통합문화이용권 사용처, 문화누리카드 지원대상 자격, 1인당 지원금액, 문화누리카드 발급 방법, 문화누리카드 사용 기간"
 
   Input: "어르신 폐렴구균 무료 예방접종"
-  Output: "national vaccination program eligibility, pneumococcal vaccine types, public health center vaccination procedure, senior free vaccination age, vaccination application method"
+  Output: "국가예방접종 지원사업 대상, 폐렴구균 백신 종류, 보건소 접종 절차, 어르신 무료 접종 나이, 예방접종 신청 방법"
 
   Input: "임산부 복지 관련"
-  Output: "pregnant women welfare benefits, maternity support fund, pregnant women eligibility criteria, maternal health care support, childbirth subsidy application"
+  Output: "임산부 복지 혜택, 임산부 지원금, 임산부 혜택 자격, 임산부 건강관리 지원, 출산 지원금 신청"
 
-  [Input Text]
+  [입력 텍스트]
   Input: "{input}"
   Output:
