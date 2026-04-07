@@ -474,20 +474,27 @@ class WelfareRAG:
             except Exception as e:
                 logger.error(f"Reranking Error: {e}")
 
-        # 6. Parent Document Retrieval
+        # 6. Parent Document Retrieval (중복 parent 제거)
         results = []
+        seen_parents = set()
         for item in final_candidates[:top_k]:
             rerank_score = item.get('rerank_score', item.get('score', 0))
             if 'rerank_score' in item and rerank_score < 0.3:
                 logger.info(f"RAG Filter: Rerank score ({rerank_score:.2f}) is below threshold, skipping irrelevant document.")
                 continue
-                
+
             metadata = item['metadata']
             doc_id = item['id']
             parent_id = metadata.get('parent_id')
-            
+
+            # 같은 parent 문서의 청크는 최고 점수 1건만 사용
+            dedup_key = str(parent_id) if parent_id else doc_id
+            if dedup_key in seen_parents:
+                continue
+            seen_parents.add(dedup_key)
+
             final_content = item['text']
-            
+
             if parent_id and str(parent_id) in self.parent_store:
                 final_content = self.parent_store[str(parent_id)].get('page_content', item['text'])
             elif 'parent_content' in metadata:
@@ -498,7 +505,7 @@ class WelfareRAG:
                 "score": item.get('rerank_score', item['score']),
                 "metadata": metadata
             })
-            
+
         return results
 
 rag_engine = WelfareRAG()
