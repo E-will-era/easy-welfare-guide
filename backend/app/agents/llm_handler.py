@@ -113,6 +113,9 @@ class LLMHandler:
             "temperature": 0.1,  # 일관되고 구조화된 출력을 위해 낮은 temperature 설정
         }
 
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+
         # 6. LLM 엔드포인트 호출 (Timeout 방지를 위해 stream=True 강제 사용)
         kwargs["stream"] = True
 
