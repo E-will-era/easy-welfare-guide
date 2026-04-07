@@ -134,7 +134,7 @@ class WelfareOrchestrator:
         logger.info(f"[Phase 3a] Query Gen: {time.perf_counter() - step_start:.2f}s | query='{search_query[:100]}'")
 
         rag_start = time.perf_counter()
-        rag_results = await self.rag.search(search_query, top_k=3)
+        rag_results = await self.rag.search(search_query, top_k=5)
         context_text = "\n".join([f"- {doc['content']}" for doc in rag_results])
 
         logger.info(f"[Phase 3b] RAG Search: {time.perf_counter() - rag_start:.2f}s ({len(rag_results)} docs)")

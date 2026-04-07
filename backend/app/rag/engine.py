@@ -379,18 +379,18 @@ class WelfareRAG:
         """BM25 검색용 토크나이저"""
         return [token.form for token in self.kiwi.tokenize(text) if token.tag.startswith('N')]
 
-    async def search(self, query: str, top_k: int = 3) -> List[Dict]:
+    async def search(self, query: str, top_k: int = 5) -> List[Dict]:
         """[Async Wrapper]"""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._search_sync, query, top_k)
 
-    def _search_sync(self, query: str, top_k: int = 3) -> List[Dict]:
+    def _search_sync(self, query: str, top_k: int = 5) -> List[Dict]:
         """[Synchronous Search Logic]"""
-        
+
         if self.collection.count() == 0:
             return []
 
-        candidate_k = top_k * 3 
+        candidate_k = top_k * 4
         
         # 1. Vector Search
         vector_results = self.collection.query(
@@ -478,7 +478,7 @@ class WelfareRAG:
         results = []
         for item in final_candidates[:top_k]:
             rerank_score = item.get('rerank_score', item.get('score', 0))
-            if 'rerank_score' in item and rerank_score < 1.0:
+            if 'rerank_score' in item and rerank_score < 0.3:
                 logger.info(f"RAG Filter: Rerank score ({rerank_score:.2f}) is below threshold, skipping irrelevant document.")
                 continue
                 
